@@ -21,23 +21,31 @@ Commercial default is **NIST security category 3** (ML-KEM-768, ML-DSA-65), depl
 
 ## 2. Use now, by use case
 
-| Use case | Use now | NIST basis | Avoid |
-|---|---|---|---|
-| Data at rest (files, DB, objects) | **AES-256-GCM** | FIPS 197, SP 800-38D | DES, 3DES, RC4, AES-ECB |
-| Disk / volume encryption | **AES-256-XTS** | SP 800-38E | AES-CBC without integrity |
-| Key wrapping (DEK under KEK) | **AES-256-KW / KWP**, or AES-256-GCM inside KMS/HSM | SP 800-38F | RSA PKCS#1 v1.5 |
-| Web / API / mTLS transport (TLS) | **TLS 1.3** with hybrid key exchange **`X25519MLKEM768`** and suite **`TLS_AES_256_GCM_SHA384`**. Full priority order in section 3.1 | SP 800-52 Rev. 2, FIPS 203, SP 800-227, SP 800-56C Rev. 2, RFC 10024 | SSL, TLS 1.0/1.1, CBC and RSA-key-transport suites, static DH, FFDH < 3072 |
-| Server / client certificates | **ECDSA P-256 or P-384**; RSA ≥ 3072 with PSS where ECC is not supported | FIPS 186-5 | SHA-1 certs, RSA < 2048, DSA |
-| Application signatures, tokens (JWT etc.) | **ECDSA P-256/P-384** or **Ed25519** | FIPS 186-5 | RSA PKCS#1 v1.5 for new designs, `alg=none`, HS256 with shared weak secrets |
-| Code and firmware signing | ECDSA P-384 today; **start ML-DSA-65/87 or LMS/XMSS now** for anything with a long field life | FIPS 186-5, FIPS 204, SP 800-208 | SHA-1, MD5 |
-| Hashing | **SHA-256** minimum, **SHA-384** preferred; SHA-3 allowed | FIPS 180-4, FIPS 202 | MD5, SHA-1 |
-| Message authentication | **HMAC-SHA-256 / HMAC-SHA-384** | FIPS 198-1 | HMAC-MD5, HMAC-SHA-1 |
-| Key derivation | **HKDF** / SP 800-108 KDFs | SP 800-56C Rev. 2, SP 800-108 Rev. 1 | Ad-hoc hash-based derivation |
-| Password storage | **PBKDF2-HMAC-SHA-256** (high iteration count) inside FIPS boundaries; **Argon2id** elsewhere | SP 800-132, SP 800-63B | Unsalted hashes, MD5, reversible encryption |
-| Random numbers | HSM / OS **DRBG** | SP 800-90A/B/C | Application-level or time-seeded PRNGs |
-| SSH | **Ed25519** user/host keys with short-lived SSH certificates; KEX **`mlkem768x25519-sha256`** | FIPS 186-5, FIPS 203 | DSA, RSA < 3072, static long-lived keys |
-| IPsec / VPN | IKEv2, AES-256-GCM, ECDH P-384 **plus** ML-KEM additional key exchange (RFC 9370), or a post-quantum pre-shared key (RFC 8784) as an interim | SP 800-77 Rev. 1 | IKEv1, DH groups < 3072-bit |
-| Cryptographic modules | **FIPS 140-3** validated HSM / KMS for Tier 1 and Tier 2 keys | FIPS 140-3 | Software keys for roots and CA keys |
+Choices are listed in priority order. Configure the 1st choice wherever the platform supports it; the 2nd choice is approved without an exception; the fallback column needs a documented reason (interoperability or platform limitation).
+
+| Use case | 1st choice | 2nd choice | Fallback (documented reason) | NIST basis | Do not use |
+|---|---|---|---|---|---|
+| Data at rest (files, DB, objects) | **AES-256-GCM** | AES-256-CCM | AES-128-GCM | FIPS 197, SP 800-38D, SP 800-38C | DES, 3DES, RC4, AES-ECB, unauthenticated CBC |
+| Disk / volume encryption | **AES-256-XTS** | None | AES-128-XTS (platform default only) | SP 800-38E | AES-CBC without integrity |
+| Key wrapping (DEK under KEK) | **AES-256-KW / KWP** | AES-256-GCM inside KMS / HSM | RSA-OAEP 3072+ (import and transport only; quantum-vulnerable) | SP 800-38F, SP 800-56B | RSA PKCS#1 v1.5 |
+| TLS protocol version | **TLS 1.3** | None | TLS 1.2 with ECDHE and AEAD suites, time-boxed exception | SP 800-52 Rev. 2 | SSL, TLS 1.0, TLS 1.1 |
+| TLS 1.3 key exchange group | **`X25519MLKEM768`** (hybrid) | `SecP256r1MLKEM768` (hybrid, all-NIST components); `SecP384r1MLKEM1024` for longest-lived data | Classical `X25519`, then `secp256r1`, then `secp384r1` | FIPS 203, SP 800-227, SP 800-56C Rev. 2, RFC 10024 | RSA key transport, static DH, FFDH < 3072 |
+| TLS 1.3 cipher suite | **`TLS_AES_256_GCM_SHA384`** | `TLS_AES_128_GCM_SHA256` | `TLS_CHACHA20_POLY1305_SHA256` (outside FIPS boundaries only) | SP 800-52 Rev. 2 | CBC-mode and non-AEAD suites |
+| Server / client certificates | **ECDSA P-384** | ECDSA P-256 | RSA 3072+ with PSS where ECC is unsupported | FIPS 186-5 | SHA-1 certs, RSA < 3072 for new keys, DSA |
+| Application signatures, tokens (JWT etc.) | **ECDSA P-384** (ES384) | ECDSA P-256 (ES256) or Ed25519 | RSA-PSS 3072+ (PS256 / PS384) | FIPS 186-5 | RSA PKCS#1 v1.5 for new designs, `alg=none`, HS256 with shared weak secrets |
+| Code signing | **Dual-sign: ECDSA P-384 + ML-DSA-65** (ML-DSA-87 for roots) | ECDSA P-384 alone until tooling supports ML-DSA | RSA-PSS 3072+ | FIPS 186-5, FIPS 204 | SHA-1, MD5, RSA PKCS#1 v1.5 |
+| Firmware / boot signing | **LMS / XMSS** with HSM-enforced state | SLH-DSA or ML-DSA-87 | ECDSA P-384 for short-lived devices only | SP 800-208, FIPS 205, FIPS 204 | SHA-1, MD5, RSA < 3072 |
+| Hashing | **SHA-384** | SHA-256 (minimum), SHA-512 | SHA-3 family where a protocol requires it | FIPS 180-4, FIPS 202 | MD5, SHA-1 |
+| Message authentication | **HMAC-SHA-384** | HMAC-SHA-256 | KMAC256 | FIPS 198-1, SP 800-185 | HMAC-MD5, HMAC-SHA-1 |
+| Key derivation | **HKDF-SHA-384** | HKDF-SHA-256 | SP 800-108 counter-mode KDF | SP 800-56C Rev. 2, SP 800-108 Rev. 1 | Ad-hoc hash-based derivation |
+| Password storage | **Argon2id** (outside FIPS boundaries) | PBKDF2-HMAC-SHA-256, high iteration count (required inside FIPS boundaries) | scrypt | SP 800-132, SP 800-63B | Unsalted hashes, MD5, reversible encryption |
+| Random numbers | **HSM DRBG** | OS kernel DRBG | None | SP 800-90A/B/C | Application-level or time-seeded PRNGs |
+| SSH key exchange | **`mlkem768x25519-sha256`** (hybrid) | `sntrup761x25519-sha512` (hybrid) | `curve25519-sha256`, then `ecdh-sha2-nistp384` | FIPS 203 | `diffie-hellman-group1/14-sha1`, DH groups < 3072-bit |
+| SSH identity (user / host keys) | **Ed25519** with short-lived SSH certificates | ECDSA P-384 | RSA-4096 for legacy devices, max 90 days | FIPS 186-5 | DSA, RSA < 3072, static long-lived keys |
+| SSH cipher | **`aes256-gcm@openssh.com`** | `aes128-gcm@openssh.com` | `chacha20-poly1305@openssh.com` (outside FIPS boundaries); `aes256-ctr` with ETM MAC | SP 800-38D | CBC ciphers, `arcfour`, `hmac-md5`, `hmac-sha1` |
+| IPsec / VPN key exchange | **IKEv2 ECDH P-384 + ML-KEM-768** additional exchange (RFC 9370) | IKEv2 ECDH P-384 + post-quantum pre-shared key (RFC 8784) | IKEv2 ECDH P-384 or P-256 alone | FIPS 203, SP 800-77 Rev. 1 | IKEv1, DH groups < 3072-bit |
+| IPsec / VPN encryption | **AES-256-GCM** | AES-128-GCM | AES-256-CBC with HMAC-SHA-384 | SP 800-77 Rev. 1 | 3DES, AES-CBC with HMAC-SHA-1 or MD5 |
+| Cryptographic modules | **FIPS 140-3 validated HSM** (Tier 1 keys) | FIPS 140-3 validated cloud KMS (Tier 2 and Tier 3 keys) | Provider-managed keys (Tier 4 only) | FIPS 140-3 | Software-held keys for roots and CA keys |
 
 Notes on items that are sound for a commercial organisation but **not** NIST-approved on their own:
 
@@ -45,6 +53,8 @@ Notes on items that are sound for a commercial organisation but **not** NIST-app
 - **X25519** is not in SP 800-56A. Inside `X25519MLKEM768` the handshake is still acceptable to NIST because the ML-KEM half is approved (SP 800-56C Rev. 2 / SP 800-227).
 - **AES-128** remains NIST-approved, including against quantum attack. AES-256 is our baseline for margin and regulator optics, not because AES-128 is broken.
 - **RSA-2048** is 112-bit strength and is the first to go. Do not issue new RSA-2048 keys.
+- **scrypt** and the OpenSSH **sntrup761** hybrid are not NIST-approved; both are acceptable outside FIPS boundaries.
+- **P-384 over P-256** and **SHA-384 over SHA-256** are enterprise preferences for margin. P-256 and SHA-256 remain fully NIST-approved.
 
 ---
 
