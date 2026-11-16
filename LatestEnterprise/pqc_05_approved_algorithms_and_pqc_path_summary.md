@@ -1,53 +1,119 @@
 # Approved Algorithms and PQC Path Summary (DOC-05)
 
 **Date:** 16 November 2026  
-**Audience:** Commercial enterprise (regulated financial services, not a national-security system)  
+**Audience:** Architects, engineers, IT operations, and compliance in a commercial enterprise (regulated financial services, not a national-security system)  
 **Status:** Normative for algorithm selection (Standards Doc #2, section 9.5)  
 **Companions:** Policy v1.1 (DOC-01), Technical Standards v1.5 (DOC-02), Secrets Management Implementation Guide v1.1 (DOC-03), Cryptography Management Implementation Guide v1.1 (DOC-04)
 
 ---
 
-## 1. Who approves what
+## 1. At a glance
 
-| Body | Role | What it means for us |
-|---|---|---|
-| **NIST** | Approves algorithms (FIPS / SP 800 series) and sets the retirement timeline (IR 8547, SP 800-131A) | The algorithm baseline. Everything in section 2 traces to a NIST publication unless flagged. |
-| **CISA** | Does **not** approve algorithms. Points to NIST standards and publishes migration guidance: the *Quantum-Readiness* factsheet (with NSA and NIST), inventory guidance, and the PQC product-category list (January 2026) | The migration playbook: inventory, prioritise by HNDL exposure, buy PQC-capable products. |
-| **NSA CNSA 2.0** | Mandatory suite for US national-security systems (ML-KEM-1024, ML-DSA-87, AES-256, SHA-384/512) | **Not required for us.** Useful as a ceiling for the few assets that need the highest margin. |
+- **Section 2 is the approved list.** Use it for every new design, build, and configuration change.
+- **Each use case is ranked.** Configure the 1st choice wherever the platform supports it. The 2nd choice is approved without an exception. A fallback needs a documented reason (interoperability or platform limitation). Anything under "Do not use" needs a formal exception under Policy section 7.
+- **Symmetric encryption, hashing, and password storage are already quantum-safe.** Nothing changes there.
+- **Post-quantum cryptography (PQC) asks for two things today**, both configuration changes on current software: hybrid key exchange on TLS 1.3 and on SSH, where the software already supports it. See section 3.
+- **Everything else in PQC is planning only.** Nobody is expected to replace certificates, PKI, code signing, VPNs, or KMS/HSM key types today. That migration is a separate programme; Part C is there to help teams plan for it.
 
-Commercial default is **NIST security category 3** (ML-KEM-768, ML-DSA-65), deployed as **hybrid** with a classical algorithm. CNSA 2.0 goes to category 5 and pure PQC; we do not need to follow that.
+| If you are | Read |
+|---|---|
+| Engineer or IT operations | Section 2 (what to configure), section 3 (the two PQC settings) |
+| Architect | Sections 2 and 3, then Part C for planning |
+| Compliance or audit | Section 2 "Do not use" columns, section 4 (traceability to NIST) |
 
 ---
 
-## 2. Use now, by use case
+# Part A. What to use
 
-Choices are listed in priority order. Configure the 1st choice wherever the platform supports it; the 2nd choice is approved without an exception; the fallback column needs a documented reason (interoperability or platform limitation).
+## 2. Approved algorithms, in priority order
 
-| Use case | 1st choice | 2nd choice | Fallback (documented reason) | NIST basis | Do not use |
-|---|---|---|---|---|---|
-| Data at rest (files, DB, objects) | **AES-256-GCM** | AES-256-CCM | AES-128-GCM | FIPS 197, SP 800-38D, SP 800-38C | DES, 3DES, RC4, AES-ECB, unauthenticated CBC |
-| Disk / volume encryption | **AES-256-XTS** | None | AES-128-XTS (platform default only) | SP 800-38E | AES-CBC without integrity |
-| Key wrapping (DEK under KEK) | **AES-256-KW / KWP** | AES-256-GCM inside KMS / HSM | RSA-OAEP 3072+ (import and transport only; quantum-vulnerable) | SP 800-38F, SP 800-56B | RSA PKCS#1 v1.5 |
-| TLS protocol version | **TLS 1.3** | None | TLS 1.2 with ECDHE and AEAD suites, time-boxed exception | SP 800-52 Rev. 2 | SSL, TLS 1.0, TLS 1.1 |
-| TLS 1.3 key exchange group | **`X25519MLKEM768`** (hybrid) | `SecP256r1MLKEM768` (hybrid, all-NIST components); `SecP384r1MLKEM1024` for longest-lived data | Classical `X25519`, then `secp256r1`, then `secp384r1` | FIPS 203, SP 800-227, SP 800-56C Rev. 2, RFC 10024 | RSA key transport, static DH, FFDH < 3072 |
-| TLS 1.3 cipher suite | **`TLS_AES_256_GCM_SHA384`** | `TLS_AES_128_GCM_SHA256` | `TLS_CHACHA20_POLY1305_SHA256` (outside FIPS boundaries only) | SP 800-52 Rev. 2 | CBC-mode and non-AEAD suites |
-| Server / client certificates | **ECDSA P-384** | ECDSA P-256 | RSA 3072+ with PSS where ECC is unsupported | FIPS 186-5 | SHA-1 certs, RSA < 3072 for new keys, DSA |
-| Application signatures, tokens (JWT etc.) | **ECDSA P-384** (ES384) | ECDSA P-256 (ES256) or Ed25519 | RSA-PSS 3072+ (PS256 / PS384) | FIPS 186-5 | RSA PKCS#1 v1.5 for new designs, `alg=none`, HS256 with shared weak secrets |
-| Code signing | **Dual-sign: ECDSA P-384 + ML-DSA-65** (ML-DSA-87 for roots) | ECDSA P-384 alone until tooling supports ML-DSA | RSA-PSS 3072+ | FIPS 186-5, FIPS 204 | SHA-1, MD5, RSA PKCS#1 v1.5 |
-| Firmware / boot signing | **LMS / XMSS** with HSM-enforced state | SLH-DSA or ML-DSA-87 | ECDSA P-384 for short-lived devices only | SP 800-208, FIPS 205, FIPS 204 | SHA-1, MD5, RSA < 3072 |
-| Hashing | **SHA-384** | SHA-256 (minimum), SHA-512 | SHA-3 family where a protocol requires it | FIPS 180-4, FIPS 202 | MD5, SHA-1 |
-| Message authentication | **HMAC-SHA-384** | HMAC-SHA-256 | KMAC256 | FIPS 198-1, SP 800-185 | HMAC-MD5, HMAC-SHA-1 |
-| Key derivation | **HKDF-SHA-384** | HKDF-SHA-256 | SP 800-108 counter-mode KDF | SP 800-56C Rev. 2, SP 800-108 Rev. 1 | Ad-hoc hash-based derivation |
-| Password storage | **Argon2id** (outside FIPS boundaries) | PBKDF2-HMAC-SHA-256, high iteration count (required inside FIPS boundaries) | scrypt | SP 800-132, SP 800-63B | Unsalted hashes, MD5, reversible encryption |
-| Random numbers | **HSM DRBG** | OS kernel DRBG | None | SP 800-90A/B/C | Application-level or time-seeded PRNGs |
-| SSH key exchange | **`mlkem768x25519-sha256`** (hybrid) | `sntrup761x25519-sha512` (hybrid) | `curve25519-sha256`, then `ecdh-sha2-nistp384` | FIPS 203 | `diffie-hellman-group1/14-sha1`, DH groups < 3072-bit |
-| SSH identity (user / host keys) | **Ed25519** with short-lived SSH certificates | ECDSA P-384 | RSA-4096 for legacy devices, max 90 days | FIPS 186-5 | DSA, RSA < 3072, static long-lived keys |
-| SSH cipher | **`aes256-gcm@openssh.com`** | `aes128-gcm@openssh.com` | `chacha20-poly1305@openssh.com` (outside FIPS boundaries); `aes256-ctr` with ETM MAC | SP 800-38D | CBC ciphers, `arcfour`, `hmac-md5`, `hmac-sha1` |
-| IPsec / VPN key exchange | **IKEv2 ECDH P-384 + ML-KEM-768** additional exchange (RFC 9370) | IKEv2 ECDH P-384 + post-quantum pre-shared key (RFC 8784) | IKEv2 ECDH P-384 or P-256 alone | FIPS 203, SP 800-77 Rev. 1 | IKEv1, DH groups < 3072-bit |
-| IPsec / VPN encryption | **AES-256-GCM** | AES-128-GCM | AES-256-CBC with HMAC-SHA-384 | SP 800-77 Rev. 1 | 3DES, AES-CBC with HMAC-SHA-1 or MD5 |
-| Cryptographic modules | **FIPS 140-3 validated HSM** (Tier 1 keys) | FIPS 140-3 validated cloud KMS (Tier 2 and Tier 3 keys) | Provider-managed keys (Tier 4 only) | FIPS 140-3 | Software-held keys for roots and CA keys |
+### 2.1 Data protection
 
-Notes on items that are sound for a commercial organisation but **not** NIST-approved on their own:
+| Use case | 1st choice | 2nd choice | Fallback (documented reason) | Do not use |
+|---|---|---|---|---|
+| Data at rest (files, DB, objects) | **AES-256-GCM** | AES-256-CCM | AES-128-GCM | DES, 3DES, RC4, AES-ECB, unauthenticated CBC |
+| Disk / volume encryption | **AES-256-XTS** | None | AES-128-XTS (platform default only) | AES-CBC without integrity |
+| Key wrapping (DEK under KEK) | **AES-256-KW / KWP** | AES-256-GCM inside KMS / HSM | RSA-OAEP 3072+ (key import and transport only) | RSA PKCS#1 v1.5 |
+| Key custody | **FIPS 140-3 validated HSM** (Tier 1 keys) | FIPS 140-3 validated cloud KMS (Tier 2 and Tier 3 keys) | Provider-managed keys (Tier 4 only) | Software-held keys for roots and CA keys |
+
+### 2.2 Data in transit
+
+TLS, SSH, and IPsec each negotiate several settings independently, so each setting has its own row and its own order. A connection uses one entry from each row. For example, hybrid TLS uses the group `X25519MLKEM768` together with the suite `TLS_AES_256_GCM_SHA384`.
+
+| Use case | 1st choice | 2nd choice | Fallback (documented reason) | Do not use |
+|---|---|---|---|---|
+| TLS protocol version | **TLS 1.3** | None | TLS 1.2 with ECDHE and AEAD suites, time-boxed exception | SSL, TLS 1.0, TLS 1.1 |
+| TLS 1.3 key exchange group | **`X25519MLKEM768`** (hybrid) | `SecP256r1MLKEM768` (hybrid, all-NIST components); `SecP384r1MLKEM1024` for longest-lived data | Classical `X25519`, then `secp256r1`, then `secp384r1`, for peers or platforms without hybrid support | RSA key transport, static DH, FFDH < 3072 |
+| TLS 1.3 cipher suite | **`TLS_AES_256_GCM_SHA384`** | `TLS_AES_128_GCM_SHA256` | `TLS_CHACHA20_POLY1305_SHA256` (outside FIPS boundaries only) | CBC-mode and non-AEAD suites |
+| SSH key exchange | **`mlkem768x25519-sha256`** (hybrid) | `sntrup761x25519-sha512` (hybrid) | `curve25519-sha256`, then `ecdh-sha2-nistp384`, for hosts without hybrid support | `diffie-hellman-group1/14-sha1`, DH groups < 3072-bit |
+| SSH cipher | **`aes256-gcm@openssh.com`** | `aes128-gcm@openssh.com` | `chacha20-poly1305@openssh.com` (outside FIPS boundaries); `aes256-ctr` with ETM MAC | CBC ciphers, `arcfour`, `hmac-md5`, `hmac-sha1` |
+| SSH identity (user / host keys) | **Ed25519** with short-lived SSH certificates | ECDSA P-384 | RSA-4096 for legacy devices, max 90 days | DSA, RSA < 3072, static long-lived keys |
+| IPsec / VPN key exchange | **IKEv2 with ECDH P-384** | IKEv2 with ECDH P-256 | None | IKEv1, DH groups < 3072-bit |
+| IPsec / VPN encryption | **AES-256-GCM** | AES-128-GCM | AES-256-CBC with HMAC-SHA-384 | 3DES, AES-CBC with HMAC-SHA-1 or MD5 |
+
+Servers enforce their own preference order. Where a TLS or SSH endpoint supports hybrid key exchange, a classical fallback is for the peer's benefit only; log those connections so the remaining non-hybrid peers can be found.
+
+### 2.3 Signatures and certificates
+
+| Use case | 1st choice | 2nd choice | Fallback (documented reason) | Do not use |
+|---|---|---|---|---|
+| Server / client certificates | **ECDSA P-384** | ECDSA P-256 | RSA 3072+ with PSS where ECC is unsupported | SHA-1 certificates, new RSA keys < 3072, DSA |
+| Application signatures, tokens (JWT etc.) | **ECDSA P-384** (ES384) | ECDSA P-256 (ES256) or Ed25519 | RSA-PSS 3072+ (PS256 / PS384) | RSA PKCS#1 v1.5 for new designs, `alg=none`, HS256 with shared weak secrets |
+| Code signing | **ECDSA P-384** | ECDSA P-256 | RSA-PSS 3072+ | SHA-1, MD5, RSA PKCS#1 v1.5 |
+| Firmware / boot signing | **ECDSA P-384** | RSA-PSS 3072+ | None | SHA-1, MD5, RSA < 3072 |
+
+### 2.4 Hashing, authentication, and key derivation
+
+| Use case | 1st choice | 2nd choice | Fallback (documented reason) | Do not use |
+|---|---|---|---|---|
+| Hashing | **SHA-384** | SHA-256 (minimum), SHA-512 | SHA-3 family where a protocol requires it | MD5, SHA-1 |
+| Message authentication | **HMAC-SHA-384** | HMAC-SHA-256 | KMAC256 | HMAC-MD5, HMAC-SHA-1 |
+| Key derivation | **HKDF-SHA-384** | HKDF-SHA-256 | SP 800-108 counter-mode KDF | Ad-hoc hash-based derivation |
+| Password storage | **Argon2id** (outside FIPS boundaries) | PBKDF2-HMAC-SHA-256, high iteration count (required inside FIPS boundaries) | scrypt | Unsalted hashes, MD5, reversible encryption |
+| Random numbers | **HSM DRBG** | OS kernel DRBG | None | Application-level or time-seeded PRNGs |
+
+---
+
+## 3. Post-quantum: what applies today
+
+| Area | Status | What is expected |
+|---|---|---|
+| TLS 1.3 key exchange | **Available now** | Enable `X25519MLKEM768` where the software already supports it (current browsers, OpenSSL 3.5+, Go 1.24+, major cloud and CDN endpoints). Keep classical groups as fallback. No certificate change. |
+| SSH key exchange | **Available now** | Enable `mlkem768x25519-sha256` on OpenSSH 9.9 or later. Keep `curve25519-sha256` as fallback. No key change. |
+| Symmetric encryption, hashing, MAC, KDF, password storage | **No change needed** | Section 2 choices are already quantum-safe. |
+| Certificates and PKI, code signing, firmware signing, tokens, IPsec / VPN, key import and BYOK wrapping, email encryption | **Planning only** | No change expected now. Keep using section 2. Product and ecosystem support is not yet general. |
+
+Enabling hybrid key exchange is a configuration change, not a migration. If a platform does not support it yet, staying on the classical fallback is compliant; no exception is needed and no platform has to be replaced for this reason alone.
+
+**What "planning only" asks of teams**
+
+- Record where RSA, ECDSA, EdDSA, and ECDH are used in the cryptographic inventory.
+- In new designs, do not hard-code algorithms, key sizes, or signature and certificate sizes. Carry an algorithm identifier so they can be changed later.
+- Ask vendors for their ML-KEM and ML-DSA roadmap at procurement and renewal.
+- Use Part C to see where each use case is heading.
+
+The PQC migration itself is run as a separate programme. Its outline timeline is in Standards Doc #2 (Post-Quantum Cryptography Transition).
+
+---
+
+## 4. Traceability to NIST
+
+| Area | NIST basis |
+|---|---|
+| AES and modes | FIPS 197; SP 800-38C (CCM), 800-38D (GCM), 800-38E (XTS), 800-38F (key wrap) |
+| TLS configuration | SP 800-52 Rev. 2 |
+| Hybrid key exchange | FIPS 203 (ML-KEM); SP 800-227; SP 800-56C Rev. 2; RFC 10024 |
+| Signatures | FIPS 186-5 (ECDSA, EdDSA, RSA-PSS) |
+| RSA key transport | SP 800-56B |
+| Hashing and MAC | FIPS 180-4, FIPS 202, FIPS 198-1, SP 800-185 |
+| Key derivation | SP 800-56C Rev. 2, SP 800-108 Rev. 1 |
+| Password storage | SP 800-132, SP 800-63B |
+| Random numbers | SP 800-90A / B / C |
+| IPsec | SP 800-77 Rev. 1 |
+| Cryptographic modules | FIPS 140-3 |
+| Algorithm retirement | SP 800-131A, NIST IR 8547 |
+
+Items in section 2 that are acceptable for a commercial organisation but are **not** NIST-approved on their own:
 
 - **ChaCha20-Poly1305** and **Argon2id** are not NIST-approved. Fine outside a FIPS boundary; keep AES-GCM and PBKDF2 where FIPS validation is claimed.
 - **X25519** is not in SP 800-56A. Inside `X25519MLKEM768` the handshake is still acceptable to NIST because the ML-KEM half is approved (SP 800-56C Rev. 2 / SP 800-227).
@@ -58,7 +124,19 @@ Notes on items that are sound for a commercial organisation but **not** NIST-app
 
 ---
 
-## 3. TLS 1.3 and hybrid key exchange against HNDL
+# Part B. Rationale
+
+## 5. Who approves what
+
+| Body | Role | What it means for us |
+|---|---|---|
+| **NIST** | Approves algorithms (FIPS / SP 800 series) and sets the retirement timeline (IR 8547, SP 800-131A) | The algorithm baseline. Everything in section 2 traces to a NIST publication unless flagged. |
+| **CISA** | Does **not** approve algorithms. Points to NIST standards and publishes migration guidance: the *Quantum-Readiness* factsheet (with NSA and NIST), inventory guidance, and the PQC product-category list (January 2026) | The migration playbook: inventory, prioritise by HNDL exposure, buy PQC-capable products. |
+| **NSA CNSA 2.0** | Mandatory suite for US national-security systems (ML-KEM-1024, ML-DSA-87, AES-256, SHA-384/512) | **Not required for us.** Useful as a ceiling for the few assets that need the highest margin. |
+
+Commercial default is **NIST security category 3** (ML-KEM-768, ML-DSA-65), deployed as **hybrid** with a classical algorithm. CNSA 2.0 goes to category 5 and pure PQC; we do not need to follow that.
+
+## 6. Why hybrid key exchange now
 
 **The threat.** In harvest-now-decrypt-later (HNDL), an adversary records encrypted traffic today and decrypts it once a quantum computer can break the ECDH or RSA key exchange. Only the **key exchange** matters for HNDL; a forged signature cannot be applied retroactively. So confidentiality of data in transit is the part that is already at risk today, and it is the first thing to fix.
 
@@ -74,49 +152,33 @@ Notes on items that are sound for a commercial organisation but **not** NIST-app
 | Cost | About 1.1 KB extra in ClientHello and ServerHello each, negligible CPU. The real risk is old middleboxes and load balancers that mishandle a large ClientHello; test those. |
 | Signatures unchanged | Certificates stay ECDSA/RSA for now. That is acceptable because authentication is not HNDL-exposed. |
 
-### 3.1 TLS 1.3 profile and priority order
-
-"Web transport" and "TLS key exchange" are the same protocol. A TLS 1.3 connection negotiates two settings independently, so there are two priority lists, not one. Hybrid is a **key exchange group**; `TLS_AES_*` are **cipher suites** that encrypt the data once the key is agreed. A hybrid connection uses one entry from each list, for example `X25519MLKEM768` together with `TLS_AES_256_GCM_SHA384`.
-
-| Priority | Key exchange group | Use |
-|---|---|---|
-| 1 | `X25519MLKEM768` | Preferred. Hybrid, protects against HNDL |
-| 2 | `SecP256r1MLKEM768` | Hybrid, where both components must be NIST-approved (FIPS boundary) |
-| 3 | `SecP384r1MLKEM1024` | Hybrid, optional, for longest-lived confidentiality requirements |
-| 4 | `X25519` | Classical fallback for peers without hybrid support |
-| 5 | `secp256r1`, then `secp384r1` | Classical fallback |
-
-| Priority | Cipher suite | Use |
-|---|---|---|
-| 1 | `TLS_AES_256_GCM_SHA384` | Preferred |
-| 2 | `TLS_AES_128_GCM_SHA256` | Approved; mandatory-to-implement for interoperability |
-| 3 | `TLS_CHACHA20_POLY1305_SHA256` | Optional, outside FIPS boundaries only |
-
-Servers enforce their own order. Log every connection that lands on a classical fallback group so the remaining non-hybrid peers can be found and fixed. TLS 1.2 is by time-boxed exception only and can never be hybrid.
-
 **Action:** enable `X25519MLKEM768` (preferred) with classical fallback on every TLS 1.3 terminator now: edge/CDN, load balancers, API gateways, service mesh, and outbound clients. This is a configuration change on current software, not a migration project.
 
 ---
 
-## 4. PQC path by use case
+# Part C. PQC planning reference
 
-| Use case | Today (classical) | Transition (hybrid, do now or next) | Target | Standard | Readiness |
+This part is for planning. It does not create requirements beyond section 3. Where the availability column says anything other than "Available now" or "Done", no change is expected today.
+
+## 7. PQC path by use case
+
+| Use case | Today (classical) | Transition step | Target | Standard | Availability |
 |---|---|---|---|---|---|
-| TLS key exchange | ECDHE X25519 / P-256 / P-384 | **X25519MLKEM768** | ML-KEM-768 hybrid; ML-KEM-1024 for longest-lived data | FIPS 203, RFC 10024 | **Ready, deploy now** |
-| SSH key exchange | curve25519-sha256 | **mlkem768x25519-sha256** (or sntrup761x25519) | Same | FIPS 203 | **Ready** (OpenSSH 9.9+, default in 10.0) |
-| IPsec / IKEv2 | ECDH P-384 | ECDH + ML-KEM via RFC 9370; RFC 8784 PPK as stop-gap | ML-KEM-768/1024 hybrid | FIPS 203 | Vendor dependent, pilot |
+| TLS key exchange | ECDHE X25519 / P-256 / P-384 | **X25519MLKEM768** | ML-KEM-768 hybrid; ML-KEM-1024 for longest-lived data | FIPS 203, RFC 10024 | **Available now** (see section 3) |
+| SSH key exchange | curve25519-sha256 | **mlkem768x25519-sha256** (or sntrup761x25519) | Same | FIPS 203 | **Available now** (OpenSSH 9.9+, default in 10.0) |
+| IPsec / IKEv2 | ECDH P-384 | ECDH + ML-KEM via RFC 9370; RFC 8784 PPK as stop-gap | ML-KEM-768/1024 hybrid | FIPS 203 | Vendor dependent |
 | Key transport / BYOK import wrap | RSA-OAEP 3072/4096 | Wrap over hybrid TLS channel; shorten wrap-key lifetime | ML-KEM-768/1024 encapsulation | FIPS 203, SP 800-227 | KMS/HSM dependent |
 | Email / document encryption (S/MIME, CMS) | RSA-OAEP, ECDH | Hybrid KEM in CMS | ML-KEM-768 | FIPS 203 | Early, track vendors |
-| Internal PKI certificates | ECDSA P-256/P-384 | Stand up a parallel ML-DSA hierarchy; composite or dual certs in pilot | **ML-DSA-65** (leaf), **ML-DSA-87** (root / issuing CA) | FIPS 204 | Pilot now, HSM firmware dependent |
+| Internal PKI certificates | ECDSA P-256/P-384 | Stand up a parallel ML-DSA hierarchy; composite or dual certs in pilot | **ML-DSA-65** (leaf), **ML-DSA-87** (root / issuing CA) | FIPS 204 | Programme pilot; HSM firmware dependent |
 | Public web certificates | ECDSA P-256 / RSA | None available from public CAs yet | ML-DSA, or Merkle Tree Certificates | FIPS 204 | **Wait**, driven by CA/B Forum and browsers |
-| Code signing | ECDSA P-384 | Dual-sign: classical + ML-DSA | ML-DSA-65/87 | FIPS 204 | Tooling emerging, pilot |
-| Firmware / boot signing, long-lived roots | ECDSA / RSA | Dual-sign | **LMS / XMSS** (stateful, needs HSM state control) or **SLH-DSA** (stateless, larger signatures) | SP 800-208, FIPS 205 | Ready, **prioritise**: devices outlive the transition |
+| Code signing | ECDSA P-384 | Dual-sign: classical + ML-DSA | ML-DSA-65/87 | FIPS 204 | Tooling emerging |
+| Firmware / boot signing, long-lived roots | ECDSA / RSA | Dual-sign | **LMS / XMSS** (stateful, needs HSM state control) or **SLH-DSA** (stateless, larger signatures) | SP 800-208, FIPS 205 | Available for new designs; plan early because devices outlive the transition |
 | JWT / API tokens, app signatures | ES256/ES384, EdDSA | Keep classical, short token lifetimes | ML-DSA-44/65 | FIPS 204 | Low urgency, no HNDL exposure |
 | Data at rest | AES-256-GCM | No change | **AES-256-GCM** | FIPS 197 | **Done**; fix the key-wrap path above |
 | Hash / MAC / KDF | SHA-256/384, HMAC, HKDF | No change | SHA-384 preferred | FIPS 180-4 | **Done** |
 | Password hashing | Argon2id / PBKDF2 | No change | Same | SP 800-132 | **Done** |
 
-**Parameter choice for a commercial organisation**
+## 8. PQC parameter choices
 
 | Algorithm | Default | Step up when |
 |---|---|---|
@@ -127,9 +189,7 @@ Servers enforce their own order. Log every connection that lands on a classical 
 | FN-DSA (FIPS 206, Falcon) | **Do not adopt yet** | Still in development at NIST |
 | HQC | **Do not adopt yet** | Selected March 2025 as backup KEM; standard still in development |
 
----
-
-## 5. Timeline anchors
+## 9. Timeline anchors
 
 | Date | Event | Source |
 |---|---|---|
@@ -145,7 +205,9 @@ Servers enforce their own order. Log every connection that lands on a classical 
 
 ---
 
-## 6. Consistency review of the document set (16 November 2026)
+# Part D. Document control
+
+## 10. Consistency review of the document set (16 November 2026)
 
 The findings below were raised against DOC-01 to DOC-04 and have been corrected in those documents.
 
@@ -173,9 +235,7 @@ The findings below were raised against DOC-01 to DOC-04 and have been corrected 
 - DOC-01 to DOC-04 each carry two reference sections (a numbered list and a trailing table) that overlap. They now agree but should be merged at the next revision.
 - File names and version numbers were left unchanged. The algorithm changes in DOC-02 are material and would normally warrant a v1.6 at the next formal approval.
 
----
-
-## 7. Sources
+## 11. Sources
 
 - NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA): <https://csrc.nist.gov/projects/post-quantum-cryptography>
 - NIST IR 8547, Transition to Post-Quantum Cryptography Standards: <https://nvlpubs.nist.gov/nistpubs/ir/2026/NIST.IR.8547.pdf>
