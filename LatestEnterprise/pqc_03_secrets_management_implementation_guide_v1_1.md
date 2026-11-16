@@ -16,9 +16,9 @@
 1. [Purpose and Scope](#1-purpose-and-scope)
 2. [Implementation Model](#2-implementation-model)
 3. [Platform Mapping](#3-platform-mapping)
-4. [Huawei Cloud Secret Management Service (CSMS)](#4-huawei-csms)
+4. [Huawei Cloud Secret Management Service (CSMS)](#4-huawei-cloud-secret-management-service-csms)
 5. [AWS Secrets Manager](#5-aws-secrets-manager)
-6. [HashiCorp Vault](#6-hashicorp-vault)
+6. [HashiCorp Vault](#6-hashicorp-vault-vmwareon-prem)
 7. [Kubernetes CSI Drivers](#7-kubernetes-csi-drivers)
 8. [VMware Integration](#8-vmware-integration)
 9. [Shared Responsibility Matrices](#9-shared-responsibility-matrices)
@@ -26,8 +26,8 @@
 11. [Troubleshooting and Operations](#11-troubleshooting-and-operations)
 
 **Appendices:**
-A. [API Examples and YAML](#appendix-a-api-examples)
-B. [Control Mapping to Standards Doc #2](#appendix-b-control-mapping)
+A. [Huawei, CyberArk, and Kubernetes Implementation Profiles](#appendix-a-huawei-cyberark-and-kubernetes-implementation-profiles)
+B. [Control Mapping to Standards Doc #2](#appendix-b-control-mapping-to-standards-doc-2)
 
 ---
 
@@ -37,7 +37,7 @@ This guide provides platform-specific implementation patterns for **secrets mana
 
 **Cryptographic key management** (KMS/vHSM/HSM) is covered in the companion **Cryptography Management Implementation Guide**.
 
-**Reference:** Secrets, Keys, and Cryptography Technical Standards v1.5 (Standards Doc #2) for lifecycle requirements, inventory schemas, and control IDs.
+**Reference:** Secrets, Keys, and Cryptography Technical Standards v1.5 (Standards Doc #2) for lifecycle requirements, inventory schemas, and section references.
 
 ### 1.1 Objectives
 
@@ -101,23 +101,23 @@ All implementations must satisfy Standards Doc #2 requirements:
 Huawei CSMS (part of DEW) provides secrets storage, versioning, rotation, and KMS-backed encryption.
 
 **Maps to Standards Doc #2:**
-- Inventory: CSMS tags → ID-SEC-01
-- Storage: KMS encryption → PR-SEC-02
-- Rotation: Scheduled → SEC-LC-05
+- Inventory: CSMS tags → §8.1 (required metadata)
+- Storage: KMS encryption → §9.1 (encryption at rest)
+- Rotation: Scheduled → §12.2 (rotation schedule)
 
 ### 4.2 Core Patterns
 
 **Pattern 1: Application Secret Storage**
-```yaml
+```bash
 # Create secret
-curl -X POST https://csms.cn-north-4.myhuaweicloud.com/v1/{project_id}/secrets \\
-  -H "X-Auth-Token: {token}" \\
-  -d '{{"name": "payments-db", "secret_string": "{encrypted_payload}", "kms_key_id": "{cmk_arn}"}}'
+curl -X POST https://csms.cn-north-4.myhuaweicloud.com/v1/{project_id}/secrets \
+  -H "X-Auth-Token: {token}" \
+  -d '{"name": "payments-db", "secret_string": "{secret_value}", "kms_key_id": "{cmk_id}"}'
 ```
 
 **Pattern 2: Rotation**
-- Use CSMS rotation jobs linked to Lambda-equivalent functions.
-- Reference Standards Doc #2 SEC-LC-05 for policy.
+- Use CSMS rotation jobs linked to FunctionGraph functions.
+- Reference Standards Doc #2 §12 for rotation requirements.
 
 ### 4.3 Integration Points
 
@@ -134,18 +134,18 @@ curl -X POST https://csms.cn-north-4.myhuaweicloud.com/v1/{project_id}/secrets \
 AWS Secrets Manager for secrets storage/retrieval/rotation with KMS integration.
 
 **Maps to Standards Doc #2:**
-- Versioning: Automatic → ID-SEC-02
-- Access: IAM policies → PR-IAM-01
+- Versioning: Automatic → §12.1 (version history)
+- Access: IAM policies → §10 (trust and authentication models)
 
 ### 5.2 Core Patterns
 
 **Pattern 1: Lambda Rotation**
 ```json
-{{
+{
   "SecretId": "payments-db",
   "KmsKeyId": "alias/my-cmk",
   "RotationLambdaARN": "arn:aws:lambda:region:account:function:RotateDBSecret"
-}}
+}
 ```
 
 **Pattern 2: ECS/EC2 Retrieval**
@@ -846,18 +846,18 @@ flowchart TB
 | R18 | HuaweiCloud Ansible collection | [HuaweiCloud Ansible collection](https://github.com/huaweicloud/huaweicloud-ansible-modules) | Hybrid orchestration with Huawei APIs |
 | R19 | Kubernetes Secrets good practices | [Kubernetes Secrets good practices](https://kubernetes.io/docs/concepts/security/secrets-good-practices/) | etcd encryption, RBAC, namespace isolation |
 | R20 | CyberArk VM integration example | [Conjur secrets in VM applications](https://developer.cyberark.com/blog/technical-deep-dive-using-conjur-secrets-in-vm-deployed-ansible-tower-applications/) | VM retrieval model reference |
-| R21 | Hong Kong OCCICS Code of Practice | [OCCICS CoP PDF](https://www.occics.gov.hk/filemanager/en/content_19/CoP_en_v1.0.pdf) | Hong Kong regulatory overlay for local deployment |
+| R22 | Hong Kong OCCICS Code of Practice | [OCCICS CoP PDF](https://www.occics.gov.hk/filemanager/en/content_19/CoP_en_v1.0.pdf) | Hong Kong regulatory overlay for local deployment |
 | R23 | OWASP API9:2023 Improper Inventory Management | [OWASP API9:2023 Improper Inventory Management](https://owasp.org/API-Security/editions/2023/en/0xa9-improper-inventory-management/) | Inventory and dependency mapping guidance for design and operations |
 | R25 | Huawei VPC best practices | [Huawei VPC Best Practices PDF](https://support.huaweicloud.com/intl/en-us/bestpractice-vpc/vpc-bestpractice-pdf.pdf) | VPC segmentation and routing context for VM examples |
 
 
 # Appendix B: Control Mapping to Standards Doc #2
 
-| Platform Pattern | Maps To Standards Control |
+| Platform Pattern | Maps To Standards Doc #2 Section |
 |------------------|---------------------------|
-| CSMS tagging | ID-SEC-01 |
-| Lambda rotation | SEC-LC-05 |
-| Vault leases | PR-SEC-03 |
+| CSMS tagging | §8.1 Required metadata fields |
+| Lambda rotation | §12.2 Rotation schedule |
+| Vault leases | §5.2 Dynamic credentials |
 
 ---
 
@@ -872,9 +872,10 @@ Inline source tags preserved in the document body, such as legacy `Rxx` citation
 | Doc Ref | Document | Version |
 |---|---|---|
 | DOC-01 | Secrets, Keys, and Cryptography Policy | v1.1 |
-| DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.4 |
+| DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.5 |
 | DOC-03 | Secrets Management Implementation Guide | v1.1 |
-| DOC-04 | Cryptography Management Implementation Guide | v1.0 |
+| DOC-04 | Cryptography Management Implementation Guide | v1.1 |
+| DOC-05 | Approved Algorithms and PQC Path Summary | 2026-11 |
 
 ### External Sources
 

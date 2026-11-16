@@ -16,18 +16,18 @@
 1. [Purpose and Scope](#1-purpose-and-scope)
 2. [Implementation Model](#2-implementation-model)
 3. [Platform Mapping](#3-platform-mapping)
-4. [Huawei Cloud KMS](#4-huawei-kms)
+4. [Huawei Cloud KMS](#4-huawei-cloud-kms)
 5. [AWS KMS](#5-aws-kms)
 6. [VMware vHSM](#6-vmware-vhsm)
-7. [CloudHSM / Dedicated HSM](#7-cloudhsm)
+7. [CloudHSM / Dedicated HSM](#7-cloudhsm--dedicated-hsm)
 8. [Shared Responsibility Matrices](#8-shared-responsibility-matrices)
 9. [Key Custody Models](#9-key-custody-models)
 10. [Migration and Onboarding](#10-migration-and-onboarding)
 11. [Troubleshooting and Operations](#11-troubleshooting-and-operations)
 
 **Appendices:**
-A. [API Examples and Configuration](#appendix-a-api-examples)
-B. [Control Mapping to Standards Doc #2](#appendix-b-control-mapping)
+A. [API Examples and Configuration](#appendix-a-api-examples-and-configuration)
+B. [Control Mapping to Standards Doc #2](#appendix-b-control-mapping-to-standards-doc-2)
 
 ---
 
@@ -37,12 +37,12 @@ This guide provides platform-specific implementation patterns for **cryptographi
 
 **Secrets management** (API keys/service credentials) is covered in the companion **Secrets Management Implementation Guide**.
 
-**Reference:** Secrets, Keys, and Cryptography Technical Standards v1.5 (Standards Doc #2) for lifecycle requirements, approved profiles, and control IDs.
+**Reference:** Secrets, Keys, and Cryptography Technical Standards v1.5 (Standards Doc #2) for lifecycle requirements and section references, and DOC-05 (Approved Algorithms and PQC Path Summary) for the approved algorithm baseline.
 
 ### 1.1 Objectives
 
 - Provide tested key management patterns for each platform.
-- Map platform capabilities to Standards Doc #2 controls (PR-KMS, PR-ALG).
+- Map platform capabilities to Standards Doc #2 sections (§5 key requirements, §9 encryption, §12 rotation).
 - Document BYOK/CMK/HYOK custody models.
 - Enable consistent cryptographic key handling across hybrid infrastructure.
 
@@ -75,7 +75,7 @@ All implementations must satisfy Standards Doc #2:
 |-------------|---------------------|
 | Tier 1 (roots/signing) | Dedicated HSM/vHSM |
 | Tier 2 (KEKs) | CloudHSM/KMS CMK |
-| Tier 3 (DEKs) | KMS BYOK |
+| Tier 3 (DEKs) | KMS CMK (BYOK where key origin must be enterprise-controlled) |
 | Tier 4 | Provider-managed (exception) |
 
 ---
@@ -99,28 +99,40 @@ All implementations must satisfy Standards Doc #2:
 Huawei KMS provides customer-managed keys (CMK) for data protection and CSMS secret encryption.
 
 **Maps to Standards Doc #2:**
-- Custody: CMK → PR-KMS-01
-- Rotation: API → PR-KMS-03
-- Audit: Cloud logs → DE-CRY-01
+- Custody: CMK → §5.5 (key hierarchy) and §9.1 (encryption at rest)
+- Rotation: API → §12.2 (rotation schedule)
+- Audit: Cloud logs → §16.1 (events that must be logged)
 
 ### 4.2 Core Patterns
 
 **Pattern 1: CMK Creation**
+Examples use the Huawei Cloud CLI (KooCLI, `hcloud`). They are illustrative; validate operation and parameter names against the current KooCLI KMS reference before use.
+
 ```bash
-aliyun kms CreateKey \\
-  --KeyUsage ENCRYPT_DECRYPT \\
-  --Description "Payments DEK" \\
-  --KeySpec SYMMETRIC_DEFAULT
+hcloud KMS CreateKey \
+  --cli-region={region} \
+  --key_alias="payments-kek" \
+  --key_spec=AES_256 \
+  --key_usage=ENCRYPT_DECRYPT
 ```
 
 **Pattern 2: BYOK Import**
+```bash
+# 1. Obtain the wrapping public key and import token
+hcloud KMS CreateParametersForImport \
+  --cli-region={region} \
+  --key_id={cmk-id} \
+  --wrapping_algorithm=RSAES_OAEP_SHA_256
+
+# 2. Import the key material wrapped under that public key
+hcloud KMS ImportKeyMaterial \
+  --cli-region={region} \
+  --key_id={cmk-id} \
+  --import_token={import-token} \
+  --encrypted_key_material={wrapped-material}
 ```
-aliyun kms ImportKeyMaterial \\
-  --KeyId {cmk-id} \\
-  --EncryptedKeyMaterial {wrapped-material} \\
-  --WrappingAlgorithm RSAES_OAEP_SHA_256 \\
-  --WrappingKeyHashAlgorithm SHA384
-```
+
+RSA-OAEP import wrapping is quantum-vulnerable. Perform the import over a hybrid TLS 1.3 channel where the endpoint supports it, use the import token once, and track vendor support for ML-KEM based import (Standards Doc #2, PQC migration requirements).
 
 ### 4.3 Integration Points
 
@@ -139,27 +151,31 @@ AWS KMS for symmetric/asymmetric keys with automatic rotation and CloudTrail aud
 ### 5.2 Core Patterns
 
 **Pattern 1: CMK w/ Rotation**
-```json
-{{
-  "KeyUsage": "ENCRYPT_DECRYPT",
-  "KeySpec": "SYMMETRIC_DEFAULT",
-  "EnableKeyRotation": true
-}}
+```bash
+aws kms create-key \
+  --key-usage ENCRYPT_DECRYPT \
+  --key-spec SYMMETRIC_DEFAULT \
+  --description "Payments KEK"
+
+aws kms enable-key-rotation \
+  --key-id {key-id} \
+  --rotation-period-in-days 365
 ```
 
 **Pattern 2: BYOK**
-```
-aws kms import-key-material \\
-  --key-id alias/my-key \\
-  --encrypted-key-material fileb://wrapped.bin \\
-  --expiration-model KEY_MATERIAL_EXPIRES \\
+```bash
+aws kms import-key-material \
+  --key-id {key-id} \
+  --import-token fileb://import-token.bin \
+  --encrypted-key-material fileb://wrapped.bin \
+  --expiration-model KEY_MATERIAL_EXPIRES \
   --expiration-time 2026-12-31T00:00:00Z
 ```
 
 **Multi-Region Replication:**
-```
-aws kms replicate-key \\
-  --key-id arn:...:primary-region \\
+```bash
+aws kms replicate-key \
+  --key-id arn:...:primary-region \
   --replica-region us-west-2
 ```
 
@@ -174,24 +190,25 @@ VMware-validated Hardware Security Module for vSphere/NSX with PKCS#11 interface
 ### 6.2 Core Patterns
 
 **vHSM Cluster Setup:**
-```
-# HSM partition creation
-pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \\
-  --login --pin 1234 --init-token --label "vHSM-Prod"
+```bash
+# HSM partition (token) initialisation, performed under dual control
+pkcs11-tool --module /opt/vhsm/libvhsm_pkcs11.so \
+  --init-token --label "vHSM-Prod" --so-pin "$VHSM_SO_PIN"
 ```
 
 **PKCS#11 Integration:**
 ```
-# App config
+# App config. The user PIN is retrieved from the secrets platform at runtime;
+# it is never written to configuration files.
 library=/opt/vhsm/libvhsm_pkcs11.so
 slot=0
-userpin=secret
 ```
 
 **Key Generation:**
-```
-pkcs11-tool --module libvhsm_pkcs11.so \\
-  --login --keypairgen --key-type EC:secp384r1 \\
+```bash
+pkcs11-tool --module /opt/vhsm/libvhsm_pkcs11.so \
+  --login --pin "$VHSM_USER_PIN" \
+  --keypairgen --key-type EC:secp384r1 \
   --label "TLS-Signing-Key"
 ```
 
@@ -206,19 +223,21 @@ Dedicated HSM partitions (AWS CloudHSM, Azure Dedicated HSM) for Tier 1 keys.
 ### 7.2 Core Patterns
 
 **AWS CloudHSM Cluster:**
-```
-aws cloudhsmv2 create-cluster \\
-  --subnet-ids subnet-123 subnet-456 \\
+```bash
+aws cloudhsmv2 create-cluster \
+  --subnet-ids subnet-123 subnet-456 \
   --hsm-type hsm1.medium
 ```
 
 **PKCS#11 Key Gen:**
+```bash
+pkcs11-tool --module /opt/cloudhsm/lib/libcloudhsm_pkcs11.so \
+  --login --pin "$CLOUDHSM_CU_CREDENTIAL" \
+  --keypairgen --key-type EC:secp384r1 \
+  --label "Tier1-Signing-Key"
 ```
-pkcs11-tool --module /opt/cloudhsm/lib/libcloudhsm_pkcs11.so \\
-  --login --so-pin {sopass} \\
-  --keypairgen --mechanism ECDSA-KEY-PAIR-GEN \\
-  --key-type EC:prime256v1
-```
+
+Tier 1 keys use P-384 in line with Standards Doc #2 section 5.4.
 
 ---
 
@@ -246,10 +265,10 @@ pkcs11-tool --module /opt/cloudhsm/lib/libcloudhsm_pkcs11.so \\
 
 | Model | Use Case | Platforms | Standards Ref |
 |-------|----------|-----------|---------------|
-| **CMK** | Tier 2/3 DEKs | All cloud KMS | PR-KMS-02 |
-| **BYOK** | Import existing | KMS w/ wrapping | PR-KMS-04 |
-| **HYOK** | Export prohibited | vHSM/CloudHSM | PR-KMS-01 |
-| **Provider-Managed** | Tier 4 only | Exception | GV-CRY-04 |
+| **CMK** | Tier 2 KEKs and Tier 3 DEKs | All cloud KMS | §5.3, §9.1 |
+| **BYOK** | Import existing | KMS w/ wrapping | §5.5, §9.1 |
+| **HYOK** | Export prohibited | vHSM/CloudHSM | §5.4, §9.4 |
+| **Provider-Managed** | Tier 4 only | Exception | §9.1; Policy §7 |
 
 ---
 
@@ -281,29 +300,34 @@ pkcs11-tool --module /opt/cloudhsm/lib/libcloudhsm_pkcs11.so \\
 
 # Appendix A: API Examples and Configuration
 
-**Huawei KMS Rotate Key Material:**
+**Huawei KMS Enable Key Rotation:**
 ```bash
-aliyun kms ScheduleKeyDeletion \\
-  --KeyId {cmk-id} \\
-  --PendingWindowInDays 7
+hcloud KMS EnableKeyRotation \
+  --cli-region={region} \
+  --key_id={cmk-id}
+
+hcloud KMS UpdateKeyRotationInterval \
+  --cli-region={region} \
+  --key_id={cmk-id} \
+  --rotation_interval=365
 ```
 
 **AWS KMS Grant Example:**
 ```json
-{{
+{
   "GranteePrincipal": "arn:aws:iam::account:role/app-role",
   "Operations": ["Decrypt", "GenerateDataKey"]
-}}
+}
 ```
 
 # Appendix B: Control Mapping to Standards Doc #2
 
-| Platform Pattern | Standards Doc #2 Control |
+| Platform Pattern | Standards Doc #2 Section |
 |------------------|--------------------------|
-| Huawei KMS CMK | PR-KMS-01 (Custody) |
-| AWS Auto Rotation | PR-KMS-03 (Rotation) |
-| vHSM PKCS#11 | PR-KMS-05 (Modules) |
-| CloudHSM Partition | PR-KMS-01 (Tier 1) |
+| Huawei KMS CMK | §5.5, §9.1 (custody) |
+| AWS Auto Rotation | §12.2 (rotation) |
+| vHSM PKCS#11 | §9.4 (HSM-backed operations) |
+| CloudHSM Partition | §5.4, §9.1 (Tier 1 custody) |
 
 ---
 
@@ -311,27 +335,33 @@ aliyun kms ScheduleKeyDeletion \\
 
 ## Algorithm Positioning
 
+The approved algorithm baseline and the per-use-case PQC path are defined in DOC-05; the table below is a summary aligned to Standards Doc #2.
+
 | Algorithm | PQC? | Recommended status |
 |---|---|---|
-| ML-KEM | Yes | Preferred PQC KEM for pilot and phased production adoption where supported |
-| ML-DSA | Yes | Preferred PQC signature algorithm for general enterprise adoption where supported |
-| SLH-DSA | Yes | Alternative PQC signature algorithm for selected high-assurance cases |
-| RSA | No | Legacy only, retire over time from priority public-key use cases |
-| ECDSA / EdDSA | No | Legacy only, migrate from priority signature use cases |
-| ECDH | No | Legacy only, replace or hybridize in key-establishment paths |
-| AES-256 | No, but remains acceptable | Preferred symmetric baseline for longer-lived protection |
-| SHA-384 / SHA-512 | No, but remains acceptable | Approved hash options for stronger profiles |
+| ML-KEM (FIPS 203) | Yes | Preferred KEM. ML-KEM-768 by default, deployed as a hybrid with ECDHE; enable now where supported |
+| ML-DSA (FIPS 204) | Yes | Preferred PQC signature. ML-DSA-65 by default; ML-DSA-87 for root CAs and long-lived roots |
+| SLH-DSA (FIPS 205) | Yes | Alternative PQC signature for roots, firmware, and long-horizon cases |
+| LMS / XMSS (SP 800-208) | Yes | Firmware and boot signing only, with HSM-enforced state management |
+| FN-DSA, HQC | Yes, standards in development | Monitor; do not adopt yet |
+| RSA | No | Approved now (3072-bit minimum, no new RSA-2048); deprecated after 2030; migrate priority use cases by 2029 |
+| ECDSA / EdDSA | No | Approved now; deprecated after 2030; migrate priority signature use cases by 2029 |
+| ECDH | No | Approved as the classical half of a hybrid or as a fallback; hybridize with ML-KEM in key-establishment paths |
+| AES-256 | No, remains secure | Symmetric baseline (GCM for data, XTS for disks, KW / KWP for key wrapping); no PQC change required |
+| SHA-256 / SHA-384 / SHA-512 | No, remains secure | SHA-256 minimum, SHA-384 preferred; no PQC change required |
 
 ## Post-Quantum Roadmap
 
 ### Recommended timeline
 
+Key establishment is migrated first because recorded traffic is exposed to harvest-now-decrypt-later; signatures follow.
+
 | Period | Recommended action |
 |---|---|
-| 2026 | Complete cryptographic inventory for RSA, ECDSA, EdDSA, ECDH, SSH, X.509, TLS, VPN, code signing, and KMS/HSM dependencies |
-| 2027 | Enable crypto-agile designs, capture algorithm metadata, and test hybrid PQC support in non-production |
-| 2028 | Pilot production hybrid ML-KEM for key establishment and ML-DSA or supported PQC signatures for selected trust chains |
-| 2029 | Target priority production migration for externally exposed and identity-bearing systems, with documented exceptions for unsupported platforms |
+| 2026 (now) | Enable hybrid key establishment (`X25519MLKEM768` for TLS 1.3, `mlkem768x25519-sha256` for SSH) wherever supported. Complete cryptographic inventory for RSA, ECDSA, EdDSA, ECDH, SSH, X.509, TLS, VPN, code signing, and KMS/HSM dependencies |
+| 2027 | Extend hybrid key establishment to remaining TLS, VPN, and key-transport paths. Enable crypto-agile designs, capture algorithm metadata, and pilot ML-DSA in non-production PKI and code signing |
+| 2028 | Pilot ML-DSA or supported PQC signatures in production for selected trust chains; begin firmware and long-lived root migration |
+| 2029 | Target priority production migration for externally exposed, identity-bearing, and long-retention systems, with documented exceptions for unsupported platforms |
 
 ### Platform recommendations
 
@@ -342,7 +372,7 @@ aliyun kms ScheduleKeyDeletion \\
 
 ### Implementation guidance
 
-- Prefer **hybrid** constructions during transition where platform support exists.
+- Prefer **hybrid** constructions during transition where platform support exists. For TLS 1.3 follow the group and cipher suite priority order in Standards Doc #2 section 9.2.1.
 - Avoid hard-coded assumptions that a key type, certificate, or signature algorithm will remain classical.
 - Store algorithm identifiers, parameter sets, certificate profile versions, and ciphertext metadata so data and trust objects remain interpretable after migration.
 - Update operational runbooks for fallback, rollback, logging, performance validation, and interop testing.
@@ -357,6 +387,7 @@ aliyun kms ScheduleKeyDeletion \\
 | DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.5 |
 | DOC-03 | Secrets Management Implementation Guide | v1.1 |
 | DOC-04 | Cryptography Management Implementation Guide | v1.1 |
+| DOC-05 | Approved Algorithms and PQC Path Summary | 2026-11 |
 
 ### External Sources
 
@@ -366,6 +397,9 @@ aliyun kms ScheduleKeyDeletion \\
 | EXT-02 | AWS CloudHSM Documentation | [https://docs.aws.amazon.com/cloudhsm/](https://docs.aws.amazon.com/cloudhsm/) |
 | EXT-03 | Huawei Cloud KMS for Encryption | [https://support.huaweicloud.com/intl/en-us/usermanual-dew/dew_01_0094.html](https://support.huaweicloud.com/intl/en-us/usermanual-dew/dew_01_0094.html) |
 | EXT-04 | NIST SP 800-57 Part 1 Rev. 5 | [https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final](https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final) |
+| EXT-11 | NIST Post-Quantum Cryptography (FIPS 203, 204, 205) | [https://csrc.nist.gov/projects/post-quantum-cryptography](https://csrc.nist.gov/projects/post-quantum-cryptography) |
+| EXT-12 | NIST IR 8547 | [https://nvlpubs.nist.gov/nistpubs/ir/2026/NIST.IR.8547.pdf](https://nvlpubs.nist.gov/nistpubs/ir/2026/NIST.IR.8547.pdf) |
+| EXT-13 | Huawei Cloud KooCLI | [https://support.huaweicloud.com/intl/en-us/productdesc-hcli/hcli_01.html](https://support.huaweicloud.com/intl/en-us/productdesc-hcli/hcli_01.html) |
 | EXT-05 | CSA Cloud Controls Matrix (CCM) | [https://cloudsecurityalliance.org/research/cloud-controls-matrix](https://cloudsecurityalliance.org/research/cloud-controls-matrix) |
 | EXT-06 | Google cryptography migration timeline | [https://blog.google/innovation-and-ai/technology/safety-security/cryptography-migration-timeline/](https://blog.google/innovation-and-ai/technology/safety-security/cryptography-migration-timeline/) |
 | EXT-07 | Google Cloud PQC overview | [https://cloud.google.com/security/resources/post-quantum-cryptography](https://cloud.google.com/security/resources/post-quantum-cryptography) |
