@@ -7,6 +7,7 @@
 
 > **Revision Note (v1.4):** Appendix A has been removed from the standards document, Appendix B has been renamed to Appendix A, the change-control section has been refreshed, and a document-level external link register has been standardized.
 > **Revision Note (v1.5):** This edition updates post-quantum cryptography (PQC) recommendations, algorithm guidance, migration timelines, and crypto-agility requirements to reflect accelerated industry movement toward 2029 readiness.
+> **Consistency update (2026-11-16):** Algorithm requirements in sections 5, 7, and 9 and the PQC transition section are aligned to DOC-05 (Approved Algorithms and PQC Path Summary); hybrid key establishment is brought forward to address harvest-now-decrypt-later exposure; NIST PQC and CISA references added; cross-references and appendix lettering corrected.
 
 **Organization Type:** Critical Financial Services Provider  
 **Document Type:** Architecture and Standards  
@@ -43,7 +44,9 @@
 20. [References](#20-references)
 
 **Appendices:**
-B. [Policy Summary](#appendix-b-policy-summary)
+A. [Policy Summary](#appendix-a-policy-summary)
+
+**Additional sections:** [Post-Quantum Cryptography Transition](#post-quantum-cryptography-transition)
 ## Regulatory Positioning
 
 This standards document is implemented with the following external reference priority:
@@ -108,6 +111,12 @@ The framework is based on recognized guidance for cryptographic key management, 
 | PCI DSS v4.0 | Financial-sector cryptographic key management and audit expectations, especially for protected data environments. |
 | ISO 27001 aligned controls | Asset management, access control, cryptography, secure operations, and vendor oversight. |
 | FIPS 140-3 | Validation baseline for cryptographic modules and HSMs used for critical material. |
+| NIST FIPS 203 / 204 / 205 | Post-quantum standards: ML-KEM (key establishment), ML-DSA and SLH-DSA (signatures). |
+| NIST SP 800-52 Rev. 2 | TLS configuration baseline. |
+| NIST SP 800-131A and NIST IR 8547 | Algorithm transition and retirement timeline, including deprecation of quantum-vulnerable public-key algorithms after 2030 and disallowance after 2035. |
+| NIST SP 800-227, SP 800-56C Rev. 2, SP 800-208 | KEM usage, hybrid key derivation, and stateful hash-based signatures (LMS / XMSS). |
+| RFC 10024 | Hybrid ECDHE-MLKEM key agreement for TLS 1.3. |
+| CISA post-quantum guidance | Migration guidance only (inventory, prioritisation, PQC-capable product categories). CISA does not approve algorithms; NIST does. |
 | NIST SP 800-63 Digital Identity Guidelines | Identity proofing, authentication, federation, authenticator lifecycle, and digital identity assurance guidance relevant to machine and service identities. |
 | Hong Kong OCCICS Code of Practice (PCI(CS) Ordinance) | Regulatory baseline for CCS governance, management plans, risk assessment, audit, incident response, access control, cryptography, logging, and documentation expectations for CI operators in Hong Kong. |
 
@@ -352,7 +361,7 @@ This section defines operational controls by secret type.
 
 | Requirement area | Standard |
 |---|---|
-| Algorithm | AES-256 for encryption, HMAC-SHA-256 or stronger for integrity |
+| Algorithm | AES-256-GCM for data encryption, AES-256-XTS for disk and volume encryption, AES-256-KW / KWP for key wrapping; HMAC-SHA-256 or stronger for integrity. Modes without integrity (ECB, unauthenticated CBC) are not approved |
 | Hierarchy | DEK wrapped by KEK, KEK protected by HSM master material |
 | Export | KEKs and master keys non-exportable wherever possible |
 | Rotation | DEKs annually or sooner, KEKs every two years or sooner |
@@ -363,7 +372,9 @@ This section defines operational controls by secret type.
 
 | Requirement area | Standard |
 |---|---|
-| Algorithms | RSA-4096 or EC P-384 for critical use; Ed25519 acceptable for SSH identity where approved |
+| Algorithms (signatures) | ECDSA P-384 for critical use (roots, CAs, code signing); ECDSA P-256 or Ed25519 for general use; RSA 3072-bit minimum with PSS only where ECC is unsupported (RSA-4096 for critical use). No new RSA-2048 keys |
+| Algorithms (key establishment) | Hybrid ML-KEM-768 with ECDHE (X25519MLKEM768) wherever supported; classical ECDHE X25519 / P-256 / P-384 as fallback only; RSA-OAEP for key wrap only |
+| Quantum status | All algorithms in the two rows above except ML-KEM are approved now, deprecated by NIST after 2030 and disallowed after 2035; see the Post-Quantum Cryptography Transition section |
 | Generation | Prefer HSM or CA engine generation |
 | Private key exposure | Private keys must not be exported from HSM for Tier 1 use cases |
 | Public distribution | Through trust store or certificate repository |
@@ -462,6 +473,7 @@ flowchart LR
 | Control | Requirement |
 |---|---|
 | Key type | Ed25519 preferred for SSH identity unless compatibility requires RSA-4096 |
+| Key exchange | `mlkem768x25519-sha256` preferred (`sntrup761x25519-sha512` acceptable); classical `curve25519-sha256` as fallback only |
 | CA trust | Hosts trust CA public key, not many individual static keys |
 | Principals | Certificate principals must be explicit and non-wildcard |
 | Private key handling | No storage in code repos or shared home directories |
@@ -613,9 +625,30 @@ All secrets must be encrypted at rest. Protection in transit and, for sensitive 
 
 ### 9.2 Encryption in transit
 
-- TLS 1.3 minimum for secret retrieval and management traffic unless documented platform limitation exists.
+- TLS 1.3 is the enterprise default for all transport, including secret retrieval and management traffic. TLS 1.2 is permitted only under a time-boxed exception with AEAD and ECDHE suites; it cannot carry hybrid post-quantum key exchange.
+- TLS 1.0, TLS 1.1, SSL, CBC-mode suites, RSA key transport, and static DH are prohibited.
 - Mutual TLS required for privileged service-to-service secret retrieval paths where feasible.
 - No plaintext transmission over email, ticketing tools, instant messaging, or shell history.
+
+#### 9.2.1 TLS 1.3 profile
+
+TLS 1.3 negotiates two things independently, and each has its own priority order. Hybrid post-quantum protection is a key exchange group, not a cipher suite.
+
+| Priority | Key exchange group (`supported_groups`) | Use |
+|---|---|---|
+| 1 | `X25519MLKEM768` | Preferred. Hybrid, protects against harvest-now-decrypt-later |
+| 2 | `SecP256r1MLKEM768` | Hybrid, where both components must be NIST-approved (FIPS boundary) |
+| 3 | `SecP384r1MLKEM1024` | Hybrid, optional, for longest-lived confidentiality requirements |
+| 4 | `X25519` | Classical fallback for peers without hybrid support |
+| 5 | `secp256r1`, then `secp384r1` | Classical fallback |
+
+| Priority | Cipher suite (record protection) | Use |
+|---|---|---|
+| 1 | `TLS_AES_256_GCM_SHA384` | Preferred |
+| 2 | `TLS_AES_128_GCM_SHA256` | Approved; mandatory-to-implement for interoperability |
+| 3 | `TLS_CHACHA20_POLY1305_SHA256` | Optional, outside FIPS boundaries only (for clients without AES hardware) |
+
+Servers must enforce their own preference order. Use of a classical fallback group must be logged so that remaining non-hybrid peers can be identified and remediated.
 
 ### 9.3 Encryption and protection in memory
 
@@ -635,6 +668,10 @@ All secrets must be encrypted at rest. Protection in transit and, for sensitive 
 | Nitro enclave / SGX / equivalent | Approved for workloads needing protected in-memory operations |
 | Agent sidecar in RAM-backed volume | Approved for service secrets and certificates |
 | Direct application memory | Allowed only when higher-assurance patterns are impractical |
+
+### 9.5 Approved algorithm baseline
+
+The approved algorithm baseline by use case (symmetric, transport, signatures, hashing, key derivation, password storage, SSH, IPsec) and the post-quantum path for each use case are maintained in **DOC-05, Approved Algorithms and PQC Path Summary**. DOC-05 is normative for algorithm selection. Where this standard names an algorithm it must match DOC-05; DOC-05 prevails if they differ.
 
 ---
 
@@ -1153,6 +1190,11 @@ Strong separation of duties is required so that no individual can request, appro
 13. FIPS 140-3 for cryptographic module validation.
 14. NIST SP 800-63 Digital Identity Guidelines for identity proofing, authentication, federation, and authenticator lifecycle management.
 15. Hong Kong OCCICS Code of Practice (Version 1.0, 1 January 2026) for the Protection of Critical Infrastructures (Computer Systems) Ordinance.
+16. NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), and FIPS 205 (SLH-DSA).
+17. NIST SP 800-52 Rev. 2, *Guidelines for the Selection, Configuration, and Use of TLS Implementations*.
+18. NIST SP 800-131A, *Transitioning the Use of Cryptographic Algorithms and Key Lengths*, and NIST IR 8547, *Transition to Post-Quantum Cryptography Standards*.
+19. NIST SP 800-227 (KEM recommendations), SP 800-56C Rev. 2 (key derivation, including hybrid), and SP 800-208 (LMS / XMSS).
+20. RFC 10024, hybrid ECDHE-MLKEM key agreement for TLS 1.3.
 
 ### 20.2 Informative implementation references
 
@@ -1211,6 +1253,11 @@ Inline references throughout this document now use human-readable **R-codes** th
 | R22 | Hong Kong OCCICS Code of Practice (v1.0, 1 Jan 2026) | [OCCICS CoP PDF](https://www.occics.gov.hk/filemanager/en/content_19/CoP_en_v1.0.pdf) | Hong Kong regulatory overlay for governance, documentation, access control, cryptography, logging, audits, and incident handling |
 | R23 | OWASP API9:2023 Improper Inventory Management | [OWASP API9:2023 Improper Inventory Management](https://owasp.org/API-Security/editions/2023/en/0xa9-improper-inventory-management/) | Inventory of integrated services, external dependencies, and exchanged data |
 | R25 | Huawei VPC best practices | [Huawei VPC Best Practices PDF](https://support.huaweicloud.com/intl/en-us/bestpractice-vpc/vpc-bestpractice-pdf.pdf) | Network segmentation and VPC routing context for VM and CCE examples |
+| R26 | NIST Post-Quantum Cryptography (FIPS 203, 204, 205) | [NIST PQC project](https://csrc.nist.gov/projects/post-quantum-cryptography) | PQC algorithm standards |
+| R27 | NIST IR 8547 | [NIST IR 8547](https://nvlpubs.nist.gov/nistpubs/ir/2026/NIST.IR.8547.pdf) | Retirement timeline for quantum-vulnerable algorithms |
+| R28 | NIST SP 800-52 Rev. 2 | [NIST SP 800-52 Rev. 2](https://csrc.nist.gov/pubs/sp/800/52/r2/final) | TLS configuration baseline |
+| R29 | RFC 10024 (ECDHE-MLKEM for TLS 1.3) | [IETF datatracker](https://datatracker.ietf.org/doc/draft-ietf-tls-ecdhe-mlkem/) | Hybrid key exchange groups |
+| R30 | CISA Post-Quantum Cryptography Initiative | [CISA PQC](https://www.cisa.gov/quantum) | Migration guidance and product categories |
 
 ### 20.5 Cross-reference validation
 
@@ -1238,10 +1285,10 @@ This standards document must be reviewed at least annually and whenever a materi
 This policy establishes governance, lifecycle controls, and operational requirements for managing secrets and cryptographic keys across the enterprise. It applies to all environments, platforms, and third-party integrations.
 
 **Authoritative sources:**
-- **NIST SP 800-57 Part 1 Rev. 5** – Key lifecycle management [R1](https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final)(https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final)
-- **NIST SP 800-53 Rev. 5** – Access, crypto, and monitoring controls [R2](https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final)(https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final)
-- **OWASP Secrets Management Cheat Sheet** – Operational secret handling [R6](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html)(https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html)
-- **Hong Kong OCCICS Code of Practice** – Local regulatory governance [R22](https://www.occics.gov.hk/filemanager/en/content_19/CoP_en_v1.0.pdf)(https://www.occics.gov.hk/filemanager/en/content_19/CoP_en_v1.0.pdf)
+- **NIST SP 800-57 Part 1 Rev. 5** – Key lifecycle management [R1](https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final)
+- **NIST SP 800-53 Rev. 5** – Access, crypto, and monitoring controls [R2](https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final)
+- **OWASP Secrets Management Cheat Sheet** – Operational secret handling [R6](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html)
+- **Hong Kong OCCICS Code of Practice** – Local regulatory governance [R22](https://www.occics.gov.hk/filemanager/en/content_19/CoP_en_v1.0.pdf)
 
 ### A.2 Definitions
 
@@ -1284,7 +1331,7 @@ This policy establishes governance, lifecycle controls, and operational requirem
 | Logging | AU-2, AU-12 | Audit trails | 6-month retention |
 | Inventory | CM-8 | Dependency mapping | Asset documentation |
 
-**B.5 Hong Kong and China Context**
+### A.5 Hong Kong and China Context
 
 **Hong Kong OCCICS CoP** (v1.0): Requires documented security plans, access control, cryptography, logging, audits, and evidence for critical infrastructure. No precise secret/key definition, but emphasizes key management and logging access to password/key files. [R22](https://www.occics.gov.hk/filemanager/en/content_19/CoP_en_v1.0.pdf)
 
@@ -1356,31 +1403,37 @@ The enterprise should treat 2029 as the target date for priority migration of qu
 
 ### Priority interpretation
 
-- **Immediate planning:** Start or continue inventory, dependency mapping, and crypto-agility remediation now.
-- **2026-2027:** Complete discovery of RSA/ECC dependencies, certificate chains, SSH, code signing, VPN, TLS termination, KMS/HSM integrations, and long-lived protected data.
-- **2027-2028:** Pilot hybrid deployments for key establishment and signatures where vendor support exists; validate performance, interoperability, logging, rollback, and evidence capture.
+Key establishment and signatures carry different urgency. Traffic recorded today can be decrypted later once the key exchange is broken (harvest-now-decrypt-later, HNDL), so key establishment is migrated first. Signatures cannot be forged retroactively and follow on the 2029 timeline.
+
+- **Now (2026):** Enable hybrid key establishment (`X25519MLKEM768` for TLS 1.3, `mlkem768x25519-sha256` for SSH) on every platform that supports it. Complete discovery of RSA/ECC dependencies, certificate chains, SSH, code signing, VPN, TLS termination, KMS/HSM integrations, and long-lived protected data.
+- **2027:** Extend hybrid key establishment to remaining TLS, VPN, and key-transport paths as vendor support arrives. Pilot PQC signatures (ML-DSA) in non-production PKI and code signing; validate performance, interoperability, logging, rollback, and evidence capture.
+- **2028:** Pilot PQC signatures in production for selected trust chains; begin firmware and long-lived root migration.
 - **By 2029:** Migrate priority systems to approved PQC or hybrid PQC constructions for quantum-vulnerable public-key functions, with residual legacy use documented and risk accepted.
+- **External anchors:** NIST deprecates quantum-vulnerable public-key algorithms after 2030 and disallows them after 2035 (NIST IR 8547).
 
 ### Algorithm table
 
 | Algorithm / family | PQC status | Typical role | Enterprise position |
 |---|---|---|---|
-| ML-KEM (Kyber) | PQC | Key establishment / KEM | Preferred NIST-standardized PQC mechanism for hybrid TLS, VPN, and session establishment |
-| ML-DSA (Dilithium) | PQC | Digital signatures | Preferred general-purpose PQC signature algorithm for software signing, authentication, and documentable trust chains where supported |
-| SLH-DSA (SPHINCS+) | PQC | Digital signatures | Alternative stateless hash-based PQC signature for selected high-assurance or long-horizon use cases |
-| FN-DSA (Falcon lineage) | PQC candidate / ecosystem use | Digital signatures | Monitor platform and standards support; do not treat as primary enterprise baseline unless formally approved |
-| RSA | Not PQC | Encryption, signatures, PKI | Legacy only; plan retirement or hybrid transition for quantum-vulnerable use cases |
-| ECDSA / EdDSA | Not PQC | Digital signatures | Legacy only for quantum-vulnerable use cases; migrate over time to approved PQC or hybrid signature models |
-| ECDH / classical DH | Not PQC | Key agreement | Legacy only; replace or hybridize with ML-KEM where supported |
-| AES-128 / AES-256 | Not PQC, but quantum-resistant with caveats | Symmetric encryption | Remains acceptable; prefer AES-256 for longer-term protection where feasible |
-| SHA-256 / SHA-384 / SHA-512 | Not PQC, but remains usable with caveats | Hashing / integrity | Remains acceptable; use approved sizes based on security level and protocol profile |
-| HMAC | Not PQC, but remains usable with caveats | Message authentication | Remains acceptable with approved hash functions and key lengths |
+| ML-KEM (FIPS 203) | PQC | Key establishment / KEM | Preferred. **ML-KEM-768** by default, deployed as a hybrid with ECDHE; ML-KEM-1024 for data needing confidentiality beyond roughly 15 years |
+| ML-DSA (FIPS 204) | PQC | Digital signatures | Preferred general-purpose PQC signature. **ML-DSA-65** by default; ML-DSA-87 for root CAs and long-lived signing roots |
+| SLH-DSA (FIPS 205) | PQC | Digital signatures | Alternative stateless hash-based signature for roots, firmware, and long-horizon use cases |
+| LMS / XMSS (SP 800-208) | PQC | Firmware and boot signing | Approved for firmware and boot signing only, with HSM-enforced state management |
+| FN-DSA (Falcon lineage) | PQC, standard in development | Digital signatures | Monitor; do not adopt until the NIST standard is final and formally approved here |
+| HQC | PQC, standard in development | Key establishment / KEM | Monitor; NIST-selected backup to ML-KEM, not yet standardised |
+| RSA | Not PQC | Encryption, signatures, PKI | Approved now within section 5.4 limits; deprecated after 2030; migrate or hybridise by 2029 for priority systems |
+| ECDSA / EdDSA | Not PQC | Digital signatures | Approved now; deprecated after 2030; migrate to ML-DSA or hybrid signature models |
+| ECDH / classical DH | Not PQC | Key agreement | Approved now only as the classical half of a hybrid or as a fallback; hybridise with ML-KEM wherever supported |
+| AES-128 / AES-256 | Not PQC, remains secure | Symmetric encryption | No change required; AES-256 is the enterprise baseline |
+| SHA-256 / SHA-384 / SHA-512 | Not PQC, remains secure | Hashing / integrity | No change required; SHA-256 minimum, SHA-384 preferred |
+| HMAC | Not PQC, remains secure | Message authentication | No change required with approved hash functions and key lengths |
 
 ### Migration requirements
 
-- Prioritize **public-key cryptography** first, because PQC migration urgency is driven mainly by the quantum risk to RSA, ECC, DH, and related trust chains.
+- Prioritize **key establishment** first because of HNDL exposure, then signatures, PKI, and code signing.
 - Treat **symmetric cryptography**, hashing, and HMAC as still usable, while favoring stronger parameter choices and crypto-agile formats.
-- Default to **hybrid transition patterns** where possible during the migration period so systems retain interoperability while adding PQC protection.
+- Default to **hybrid transition patterns** during the migration period so systems retain interoperability while adding PQC protection.
+- Treat RSA-OAEP key transport, including BYOK import wrapping, as quantum-vulnerable: protect the transfer with a hybrid TLS channel, keep wrapping keys short-lived, and adopt ML-KEM encapsulation when the KMS or HSM supports it.
 - Update certificate, software-signing, secrets-distribution, SSH, and workload-identity architectures to carry algorithm metadata and versioning needed for crypto-agility.
 - Require every new cryptographic design to document whether it is PQC-ready, hybrid-ready, or legacy-bound.
 
@@ -1399,7 +1452,8 @@ Inline source tags preserved in the document body, such as legacy `Rxx` citation
 | DOC-01 | Secrets, Keys, and Cryptography Policy | v1.1 |
 | DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.5 |
 | DOC-03 | Secrets Management Implementation Guide | v1.1 |
-| DOC-04 | Cryptography Management Implementation Guide | v1.0 |
+| DOC-04 | Cryptography Management Implementation Guide | v1.1 |
+| DOC-05 | Approved Algorithms and PQC Path Summary | 2026-11 |
 
 ### External Sources
 

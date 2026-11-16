@@ -17,6 +17,7 @@
 |---------|------|--------|--------|---------|
 | 0.1 | 2026-03-23 | Security Architecture | Draft | Initial policy aligned to Cap. 653, HKMA, NIST CSF 2.0 Govern function |
 | 1.0 | 2026-04-01 | Security Architecture | Approved | Final version with board review comments incorporated |
+| 1.1 | 2026-11-16 | Security Architecture | Approved | Companion document versions aligned; algorithm baseline and PQC transition principle aligned to Standards v1.5 and DOC-05 |
 
 ---
 
@@ -37,7 +38,7 @@
 
 ## 1. Purpose and Scope
 
-This policy establishes the enterprise governance requirements for secrets management, cryptographic key management, and cryptography usage to satisfy Cap. 653 critical infrastructure obligations, HKMA/SFC financial services requirements, and NIST CSF 2.0 enterprise cybersecurity framework.
+This policy establishes the enterprise governance requirements for secrets management, cryptographic key management, and cryptography usage to satisfy Cap. 653 critical infrastructure obligations, applicable SFC requirements, and the NIST CSF 2.0 enterprise cybersecurity framework, with HKMA guidance used as an informative benchmark.
 
 **Scope:** All production and non-production environments including on-premises, VMware, Huawei private cloud, Kubernetes clusters, and public cloud services.
 
@@ -65,9 +66,9 @@ This policy derives authority from:
 
 | Universe | Definition | Examples | Policy Driver |
 |----------|------------|----------|---------------|
-| **Secrets** | Sensitive values granting access/auth/authz | API keys, service passwords, tokens, client secrets | Cap. 653 access control; HKMA client protection |
+| **Secrets** | Sensitive values granting access/auth/authz | API keys, service passwords, tokens, client secrets | Cap. 653 access control; SFC credential-handling expectations |
 | **Cryptographic Keys** | Parameters for crypto algorithms | DEKs/KEKs, signing keys, HMAC keys | Cap. 653 cryptography; NIST 800-57 lifecycle |
-| **Cryptography** | Algorithms/modules/protocols | AES-256, ECDSA, TLS 1.3, HSM/KMS | Cap. 653 cryptography; NIST approved lists |
+| **Cryptography** | Algorithms/modules/protocols | AES-256-GCM, ECDSA, ML-KEM / ML-DSA, TLS 1.3, HSM/KMS | Cap. 653 cryptography; NIST approved lists |
 
 **Overlap:** Secrets often encrypted by crypto keys; certificates combine public crypto key + private key secret.
 
@@ -78,9 +79,9 @@ This policy derives authority from:
 1. **Cap. 653 Compliance First** — All secrets/keys/crypto controls must satisfy statutory management plan, risk assessment, audit, access control, cryptography, logging, and incident response obligations.
 2. **Integrated Lifecycle Governance** — Secrets, keys, and cryptography follow unified lifecycle principles from design through destruction.
 3. **Least Privilege and Separation** — No single individual controls secret/key lifecycle end-to-end; privileged access separated.
-4. **Crypto Strength** — Only enterprise-approved algorithms, key sizes, and FIPS-equivalent modules for production.
+4. **Crypto Strength** — Only enterprise-approved algorithms, key sizes, and FIPS 140-3 validated (or approved equivalent) modules for production. The approved baseline is defined in Standards Doc #2 and DOC-05.
 5. **Auditability** — All access, rotation, policy changes logged with 6-month minimum retention per Cap. 653.
-6. **Crypto-Agility** — Designs support algorithm parameter replacement without re-architecture.
+6. **Crypto-Agility** — Designs support algorithm parameter replacement without re-architecture. Quantum-vulnerable public-key cryptography is migrated to NIST post-quantum standards, key establishment first (harvest-now-decrypt-later exposure), with priority systems complete by 2029.
 7. **Regional Compliance** — PRC commercial cryptography (SM-series) where business/regulatory requirements apply.
 8. **Evidence-Based Assurance** — Design, implementation, and operating evidence maintained for regulatory audit.
 
@@ -162,7 +163,7 @@ All deviations require formal risk acceptance.
 | Field | Required |
 |-------|----------|
 | Exception ID | Unique |
-| Impacted Controls | Standards Doc #2 IDs |
+| Impacted Controls | Standards Doc #2 section references |
 | Business Justification | Why non-compliant |
 | Risk Assessment | Confidentiality/integrity/availability/regulatory impact |
 | Compensating Controls | Interim measures |
@@ -230,7 +231,8 @@ Mapped in Section 5.
 4. NIST Cybersecurity Framework 2.0
 5. Secrets, Keys, and Cryptography Technical Standards v1.5
 6. Secrets Management Implementation Guide v1.1
-7. Cryptography Management Implementation Guide v1.0
+7. Cryptography Management Implementation Guide v1.1
+8. Approved Algorithms and PQC Path Summary (DOC-05)
 
 ---
 
@@ -243,9 +245,10 @@ Mapped in Section 5.
 | Doc Ref | Document | Version |
 |---|---|---|
 | DOC-01 | Secrets, Keys, and Cryptography Policy | v1.1 |
-| DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.4 |
+| DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.5 |
 | DOC-03 | Secrets Management Implementation Guide | v1.1 |
-| DOC-04 | Cryptography Management Implementation Guide | v1.0 |
+| DOC-04 | Cryptography Management Implementation Guide | v1.1 |
+| DOC-05 | Approved Algorithms and PQC Path Summary | 2026-11 |
 
 ### External Sources
 
