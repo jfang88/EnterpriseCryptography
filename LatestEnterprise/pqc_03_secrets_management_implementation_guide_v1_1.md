@@ -875,7 +875,7 @@ Inline source tags preserved in the document body, such as legacy `Rxx` citation
 | DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.5 |
 | DOC-03 | Secrets Management Implementation Guide | v1.1 |
 | DOC-04 | Cryptography Management Implementation Guide | v1.1 |
-| DOC-05 | Approved Algorithms and PQC Path Summary | 2026-11 |
+| DOC-05 | Approved Algorithms and PQC Path Summary | v0.3 (draft for approval) |
 
 ### External Sources
 

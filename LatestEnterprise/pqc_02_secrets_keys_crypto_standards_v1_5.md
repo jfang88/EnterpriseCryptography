@@ -7,6 +7,7 @@
 
 > **Revision Note (v1.4):** Appendix A has been removed from the standards document, Appendix B has been renamed to Appendix A, the change-control section has been refreshed, and a document-level external link register has been standardized.
 > **Revision Note (v1.5):** This edition updates post-quantum cryptography (PQC) recommendations, algorithm guidance, migration timelines, and crypto-agility requirements to reflect accelerated industry movement toward 2029 readiness.
+> **Consistency update (2026-11-23):** PQC migration targets reframed as PQC programme targets rather than obligations on every team; TLS 1.2 made an approved fallback with a named suite list; the TLS 1.3 profile now lives only in DOC-05.
 > **Consistency update (2026-11-16):** Algorithm requirements in sections 5, 7, and 9 and the PQC transition section are aligned to DOC-05 (Approved Algorithms and PQC Path Summary); hybrid key establishment is brought forward to address harvest-now-decrypt-later exposure; NIST PQC and CISA references added; cross-references and appendix lettering corrected.
 
 **Organization Type:** Critical Financial Services Provider  
@@ -625,30 +626,15 @@ All secrets must be encrypted at rest. Protection in transit and, for sensitive 
 
 ### 9.2 Encryption in transit
 
-- TLS 1.3 is the enterprise default for all transport, including secret retrieval and management traffic. TLS 1.2 is permitted only under a time-boxed exception with AEAD and ECDHE suites; it cannot carry hybrid post-quantum key exchange.
+- TLS 1.3 is the enterprise default for all transport, including secret retrieval and management traffic.
+- TLS 1.2 is an approved fallback, with a documented reason, for systems that cannot yet support TLS 1.3. It must use only these suites: `TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384`, `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384`, `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256`, `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`. TLS 1.2 cannot carry hybrid post-quantum key exchange, so it should be retired as platforms allow.
 - TLS 1.0, TLS 1.1, SSL, CBC-mode suites, RSA key transport, and static DH are prohibited.
 - Mutual TLS required for privileged service-to-service secret retrieval paths where feasible.
 - No plaintext transmission over email, ticketing tools, instant messaging, or shell history.
 
-#### 9.2.1 TLS 1.3 profile
+#### 9.2.1 TLS profile
 
-TLS 1.3 negotiates two things independently, and each has its own priority order. Hybrid post-quantum protection is a key exchange group, not a cipher suite.
-
-| Priority | Key exchange group (`supported_groups`) | Use |
-|---|---|---|
-| 1 | `X25519MLKEM768` | Preferred. Hybrid, protects against harvest-now-decrypt-later |
-| 2 | `SecP256r1MLKEM768` | Hybrid, where both components must be NIST-approved (FIPS boundary) |
-| 3 | `SecP384r1MLKEM1024` | Hybrid, optional, for longest-lived confidentiality requirements |
-| 4 | `X25519` | Classical fallback for peers without hybrid support |
-| 5 | `secp256r1`, then `secp384r1` | Classical fallback |
-
-| Priority | Cipher suite (record protection) | Use |
-|---|---|---|
-| 1 | `TLS_AES_256_GCM_SHA384` | Preferred |
-| 2 | `TLS_AES_128_GCM_SHA256` | Approved; mandatory-to-implement for interoperability |
-| 3 | `TLS_CHACHA20_POLY1305_SHA256` | Optional, outside FIPS boundaries only (for clients without AES hardware) |
-
-Servers must enforce their own preference order. Use of a classical fallback group must be logged so that remaining non-hybrid peers can be identified and remediated.
+The TLS profile (protocol versions, key exchange groups, and cipher suites, each in priority order) is maintained in **DOC-05, section 2.2**. It is not repeated here, so there is a single source of truth.
 
 ### 9.3 Encryption and protection in memory
 
@@ -1399,16 +1385,22 @@ Where this standards document refers to access control, secret entitlement, key 
 
 ### PQC transition posture
 
-The enterprise should treat 2029 as the target date for priority migration of quantum-vulnerable public-key cryptography in externally exposed, identity-bearing, and long-retention systems. This target reflects accelerated industry timelines and should be used to drive planning for authentication, digital signatures, PKI, key establishment, software signing, secrets delivery trust chains, and administrator access paths.
+Migration of quantum-vulnerable public-key cryptography is run as a separate, governed **PQC programme**. The programme works to a target of 2029 for priority systems (externally exposed, identity-bearing, and long-retention), ahead of NIST deprecation after 2030.
+
+This standard does **not** require teams to migrate on their own schedule. Outside the programme, the only post-quantum requirement on teams is to enable hybrid key exchange on TLS 1.3 and SSH where their current software already supports it (DOC-05, section 3). Everything else is adopted when the programme schedules it and product support exists.
 
 ### Priority interpretation
 
-Key establishment and signatures carry different urgency. Traffic recorded today can be decrypted later once the key exchange is broken (harvest-now-decrypt-later, HNDL), so key establishment is migrated first. Signatures cannot be forged retroactively and follow on the 2029 timeline.
+Key establishment and signatures carry different urgency. Traffic recorded today can be decrypted later once the key exchange is broken (harvest-now-decrypt-later, HNDL), so key establishment comes first. Signatures cannot be forged retroactively and can follow later.
 
-- **Now (2026):** Enable hybrid key establishment (`X25519MLKEM768` for TLS 1.3, `mlkem768x25519-sha256` for SSH) on every platform that supports it. Complete discovery of RSA/ECC dependencies, certificate chains, SSH, code signing, VPN, TLS termination, KMS/HSM integrations, and long-lived protected data.
-- **2027:** Extend hybrid key establishment to remaining TLS, VPN, and key-transport paths as vendor support arrives. Pilot PQC signatures (ML-DSA) in non-production PKI and code signing; validate performance, interoperability, logging, rollback, and evidence capture.
-- **2028:** Pilot PQC signatures in production for selected trust chains; begin firmware and long-lived root migration.
-- **By 2029:** Migrate priority systems to approved PQC or hybrid PQC constructions for quantum-vulnerable public-key functions, with residual legacy use documented and risk accepted.
+The programme's indicative phases are below. They are planning targets for the programme, not obligations on individual teams.
+
+| Phase | Programme activity |
+|---|---|
+| 2026 | Teams enable hybrid TLS 1.3 and SSH key exchange where already supported. Programme builds the cryptographic inventory of RSA/ECC dependencies, certificate chains, SSH, code signing, VPN, TLS termination, KMS/HSM integrations, and long-lived protected data |
+| 2027 | Programme extends hybrid key establishment to further TLS, VPN, and key-transport paths as vendor support arrives, and pilots ML-DSA in non-production PKI and code signing |
+| 2028 | Programme pilots PQC signatures in production for selected trust chains and begins firmware and long-lived root migration |
+| 2029 | Programme target for priority systems, with residual legacy use documented and risk accepted |
 - **External anchors:** NIST deprecates quantum-vulnerable public-key algorithms after 2030 and disallows them after 2035 (NIST IR 8547).
 
 ### Algorithm table
@@ -1421,21 +1413,21 @@ Key establishment and signatures carry different urgency. Traffic recorded today
 | LMS / XMSS (SP 800-208) | PQC | Firmware and boot signing | Approved for firmware and boot signing only, with HSM-enforced state management |
 | FN-DSA (Falcon lineage) | PQC, standard in development | Digital signatures | Monitor; do not adopt until the NIST standard is final and formally approved here |
 | HQC | PQC, standard in development | Key establishment / KEM | Monitor; NIST-selected backup to ML-KEM, not yet standardised |
-| RSA | Not PQC | Encryption, signatures, PKI | Approved now within section 5.4 limits; deprecated after 2030; migrate or hybridise by 2029 for priority systems |
-| ECDSA / EdDSA | Not PQC | Digital signatures | Approved now; deprecated after 2030; migrate to ML-DSA or hybrid signature models |
+| RSA | Not PQC | Encryption, signatures, PKI | Approved now within section 5.4 limits; deprecated by NIST after 2030; replaced through the PQC programme |
+| ECDSA / EdDSA | Not PQC | Digital signatures | Approved now; deprecated by NIST after 2030; replaced by ML-DSA or hybrid signatures through the PQC programme |
 | ECDH / classical DH | Not PQC | Key agreement | Approved now only as the classical half of a hybrid or as a fallback; hybridise with ML-KEM wherever supported |
 | AES-128 / AES-256 | Not PQC, remains secure | Symmetric encryption | No change required; AES-256 is the enterprise baseline |
 | SHA-256 / SHA-384 / SHA-512 | Not PQC, remains secure | Hashing / integrity | No change required; SHA-256 minimum, SHA-384 preferred |
 | HMAC | Not PQC, remains secure | Message authentication | No change required with approved hash functions and key lengths |
 
-### Migration requirements
+### Migration principles (applied by the PQC programme)
 
 - Prioritize **key establishment** first because of HNDL exposure, then signatures, PKI, and code signing.
 - Treat **symmetric cryptography**, hashing, and HMAC as still usable, while favoring stronger parameter choices and crypto-agile formats.
 - Default to **hybrid transition patterns** during the migration period so systems retain interoperability while adding PQC protection.
 - Treat RSA-OAEP key transport, including BYOK import wrapping, as quantum-vulnerable: protect the transfer with a hybrid TLS channel, keep wrapping keys short-lived, and adopt ML-KEM encapsulation when the KMS or HSM supports it.
 - Update certificate, software-signing, secrets-distribution, SSH, and workload-identity architectures to carry algorithm metadata and versioning needed for crypto-agility.
-- Require every new cryptographic design to document whether it is PQC-ready, hybrid-ready, or legacy-bound.
+- New cryptographic designs record whether they are PQC-ready, hybrid-ready, or legacy-bound, so the programme can plan for them. This is a record, not a requirement to be PQC-ready.
 
 ### Migration plan linkage
 
@@ -1453,7 +1445,7 @@ Inline source tags preserved in the document body, such as legacy `Rxx` citation
 | DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.5 |
 | DOC-03 | Secrets Management Implementation Guide | v1.1 |
 | DOC-04 | Cryptography Management Implementation Guide | v1.1 |
-| DOC-05 | Approved Algorithms and PQC Path Summary | 2026-11 |
+| DOC-05 | Approved Algorithms and PQC Path Summary | v0.3 (draft for approval) |
 
 ### External Sources
 

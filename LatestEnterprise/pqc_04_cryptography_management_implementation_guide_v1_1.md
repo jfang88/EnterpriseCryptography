@@ -344,8 +344,8 @@ The approved algorithm baseline and the per-use-case PQC path are defined in DOC
 | SLH-DSA (FIPS 205) | Yes | Alternative PQC signature for roots, firmware, and long-horizon cases |
 | LMS / XMSS (SP 800-208) | Yes | Firmware and boot signing only, with HSM-enforced state management |
 | FN-DSA, HQC | Yes, standards in development | Monitor; do not adopt yet |
-| RSA | No | Approved now (3072-bit minimum, no new RSA-2048); deprecated after 2030; migrate priority use cases by 2029 |
-| ECDSA / EdDSA | No | Approved now; deprecated after 2030; migrate priority signature use cases by 2029 |
+| RSA | No | Approved now (3072-bit minimum, no new RSA-2048); deprecated by NIST after 2030; replaced through the PQC programme |
+| ECDSA / EdDSA | No | Approved now; deprecated by NIST after 2030; replaced through the PQC programme |
 | ECDH | No | Approved as the classical half of a hybrid or as a fallback; hybridize with ML-KEM in key-establishment paths |
 | AES-256 | No, remains secure | Symmetric baseline (GCM for data, XTS for disks, KW / KWP for key wrapping); no PQC change required |
 | SHA-256 / SHA-384 / SHA-512 | No, remains secure | SHA-256 minimum, SHA-384 preferred; no PQC change required |
@@ -354,9 +354,9 @@ The approved algorithm baseline and the per-use-case PQC path are defined in DOC
 
 ### Recommended timeline
 
-Key establishment is migrated first because recorded traffic is exposed to harvest-now-decrypt-later; signatures follow.
+PQC migration is run as a separate programme (Standards Doc #2, Post-Quantum Cryptography Transition). The phases below are the programme's indicative plan for KMS, HSM, and PKI platforms, not obligations on platform teams. Outside the programme, teams only enable hybrid key exchange where their current software already supports it (DOC-05, section 3).
 
-| Period | Recommended action |
+| Period | Programme activity |
 |---|---|
 | 2026 (now) | Enable hybrid key establishment (`X25519MLKEM768` for TLS 1.3, `mlkem768x25519-sha256` for SSH) wherever supported. Complete cryptographic inventory for RSA, ECDSA, EdDSA, ECDH, SSH, X.509, TLS, VPN, code signing, and KMS/HSM dependencies |
 | 2027 | Extend hybrid key establishment to remaining TLS, VPN, and key-transport paths. Enable crypto-agile designs, capture algorithm metadata, and pilot ML-DSA in non-production PKI and code signing |
@@ -368,11 +368,11 @@ Key establishment is migrated first because recorded traffic is exposed to harve
 - **Huawei KMS / cloud KMS services:** Track vendor support for PQC key establishment, certificate, and signing workflows; do not assume current KMS APIs alone deliver full PQC trust-chain migration.
 - **AWS KMS:** Monitor and adopt supported PQC or hybrid capabilities as exposed through AWS cryptographic services, TLS endpoints, or related key-management integrations.
 - **vHSM / CloudHSM:** Use where enterprise-controlled key custody or signature workflows need higher assurance during phased migration; validate library, firmware, PKCS#11, and application compatibility early.
-- **PKI and code signing:** Treat these as first-class PQC migration streams because authentication and signature trust chains are a major 2029 priority.
+- **PKI and code signing:** Expected to be the largest PQC programme workstreams, because authentication and signature trust chains take longest to replace.
 
 ### Implementation guidance
 
-- Prefer **hybrid** constructions during transition where platform support exists. For TLS 1.3 follow the group and cipher suite priority order in Standards Doc #2 section 9.2.1.
+- Prefer **hybrid** constructions during transition where platform support exists. For TLS follow the version, group, and cipher suite priority order in DOC-05 section 2.2.
 - Avoid hard-coded assumptions that a key type, certificate, or signature algorithm will remain classical.
 - Store algorithm identifiers, parameter sets, certificate profile versions, and ciphertext metadata so data and trust objects remain interpretable after migration.
 - Update operational runbooks for fallback, rollback, logging, performance validation, and interop testing.
@@ -387,7 +387,7 @@ Key establishment is migrated first because recorded traffic is exposed to harve
 | DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.5 |
 | DOC-03 | Secrets Management Implementation Guide | v1.1 |
 | DOC-04 | Cryptography Management Implementation Guide | v1.1 |
-| DOC-05 | Approved Algorithms and PQC Path Summary | 2026-11 |
+| DOC-05 | Approved Algorithms and PQC Path Summary | v0.3 (draft for approval) |
 
 ### External Sources
 
