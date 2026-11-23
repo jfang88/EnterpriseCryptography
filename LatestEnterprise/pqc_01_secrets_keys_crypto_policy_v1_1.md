@@ -81,7 +81,7 @@ This policy derives authority from:
 3. **Least Privilege and Separation** — No single individual controls secret/key lifecycle end-to-end; privileged access separated.
 4. **Crypto Strength** — Only enterprise-approved algorithms, key sizes, and FIPS 140-3 validated (or approved equivalent) modules for production. The approved baseline is defined in Standards Doc #2 and DOC-05.
 5. **Auditability** — All access, rotation, policy changes logged with 6-month minimum retention per Cap. 653.
-6. **Crypto-Agility** — Designs support algorithm parameter replacement without re-architecture. Quantum-vulnerable public-key cryptography is migrated to NIST post-quantum standards, key establishment first (harvest-now-decrypt-later exposure), with priority systems complete by 2029.
+6. **Crypto-Agility** — Designs support algorithm parameter replacement without re-architecture. Quantum-vulnerable public-key cryptography is migrated to NIST post-quantum standards, key establishment first (harvest-now-decrypt-later exposure). The migration is run as a governed PQC programme with its own targets; teams adopt post-quantum algorithms as the programme and product support make them available, not ahead of it.
 7. **Regional Compliance** — PRC commercial cryptography (SM-series) where business/regulatory requirements apply.
 8. **Evidence-Based Assurance** — Design, implementation, and operating evidence maintained for regulatory audit.
 
@@ -248,7 +248,7 @@ Mapped in Section 5.
 | DOC-02 | Secrets, Keys, and Cryptography Technical Standards | v1.5 |
 | DOC-03 | Secrets Management Implementation Guide | v1.1 |
 | DOC-04 | Cryptography Management Implementation Guide | v1.1 |
-| DOC-05 | Approved Algorithms and PQC Path Summary | 2026-11 |
+| DOC-05 | Approved Algorithms and PQC Path Summary | v0.3 (draft for approval) |
 
 ### External Sources
 
